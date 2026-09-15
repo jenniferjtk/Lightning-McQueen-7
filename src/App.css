@@ -1,0 +1,203 @@
+:root {
+  --color-asphalt: #1B2430;
+  --color-asphalt-light: #293545;
+  --color-paper: #F5F3EE;
+  --color-card: #FFFFFF;
+  --color-steel: #3A6EA5;
+  --color-amber: #D98E2E;
+  --color-ink: #1B2430;
+  --color-slate: #5B6B79;
+  --color-line: #E4E0D6;
+
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-mono: 'Roboto Mono', ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+}
+
+.app {
+  min-height: 100vh;
+}
+
+.navbar {
+  display: flex;
+  align-items: center;
+  gap: 2.5rem;
+  background: var(--color-asphalt);
+  color: #EDEBE4;
+  padding: 0.9rem 2rem;
+}
+
+.navbar__brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-weight: 700;
+  font-size: 1.05rem;
+  letter-spacing: 0.01em;
+}
+
+.navbar__mark {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 2px;
+  background: var(--color-amber);
+}
+
+.navbar__links {
+  display: flex;
+  gap: 0.25rem;
+  flex: 1;
+}
+
+.navbar__link {
+  background: none;
+  border: none;
+  color: #B9C2CC;
+  font-family: inherit;
+  font-size: 0.92rem;
+  font-weight: 500;
+  padding: 0.5rem 0.85rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.navbar__user {
+  font-size: 0.9rem;
+  color: #D8D3C6;
+  font-weight: 500;
+}
+
+.dashboard {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 2.5rem 1.5rem 4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.dashboard__top {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 1.5rem;
+}
+
+.card {
+  background: var(--color-card);
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  padding: 1.5rem 1.6rem;
+}
+
+.card__title {
+  margin: 0 0 1.1rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--color-slate);
+}
+
+.points-card {
+  background: var(--color-asphalt);
+  border-color: var(--color-asphalt);
+  color: #FFFFFF;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.35rem;
+}
+
+.points-card__label {
+  font-size: 0.85rem;
+  color: #A9B3BD;
+  font-weight: 500;
+}
+
+.points-card__value {
+  font-family: var(--font-mono);
+  font-size: 3rem;
+  font-weight: 500;
+  color: var(--color-amber);
+  line-height: 1.1;
+}
+
+.points-card__sub {
+  font-size: 0.82rem;
+  color: #8C97A2;
+}
+
+.profile-card__list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.profile-card__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.profile-card__row dt {
+  color: var(--color-slate);
+  font-size: 0.88rem;
+}
+
+.profile-card__row dd {
+  margin: 0;
+  font-weight: 600;
+  text-align: right;
+}
+
+.purchases-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.purchases-table th {
+  text-align: left;
+  color: var(--color-slate);
+  font-weight: 600;
+  font-size: 0.82rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.purchases-table td {
+  padding: 0.7rem 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.purchases-table__points-col {
+  text-align: right;
+  font-family: var(--font-mono);
+  color: var(--color-steel);
+  white-space: nowrap;
+}
+
+.purchases-card__empty {
+  color: var(--color-slate);
+  font-size: 0.9rem;
+}
+
+.state-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-slate);
+  font-family: var(--font-body);
+}
