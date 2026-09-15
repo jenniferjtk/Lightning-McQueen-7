@@ -1,0 +1,31 @@
+service: lightning-mcqueen-backend
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: us-east-2
+  environment:
+    DB_HOST: ${env:DB_HOST}
+    DB_USER: ${env:DB_USER}
+    DB_PASSWORD: ${env:DB_PASSWORD}
+    DB_NAME: ${env:DB_NAME}
+
+functions:
+  about:
+    handler: handlers/about.handler
+    events:
+      - httpApi:
+          path: /about
+          method: get
+  login:
+    handler: handlers/login.handler
+    events:
+      - httpApi:
+          path: /login
+          method: post
+  register:
+    handler: handlers/register.handler
+    events:
+      - httpApi:
+          path: /register
+          method: post
