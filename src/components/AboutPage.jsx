@@ -4,11 +4,10 @@ export default function AboutPage() {
   return (
     <main className="about-page">
       <section className="about-page__intro">
-        <p className="about-page__eyebrow">Lightning McQueen Rewards</p>
-        <h1>Built for drivers who go the extra mile.</h1>
+        <p className="about-page__eyebrow">Lightning McQueen</p>
+        <h1>Good Driver Incentive Program</h1>
         <p className="about-page__summary">
-          Track your rewards, manage your points, and make every mile count.
-          This dashboard keeps your driver benefits in one place.
+          Team 07 | Sprint 01 | Released 09/15/2026
         </p>
       </section>
 
@@ -16,7 +15,7 @@ export default function AboutPage() {
         <div className="about-page__detail">
           <span className="about-page__number">01</span>
           <h2>Earn points</h2>
-          <p>Collect points through qualifying purchases and driver activities.</p>
+          <p>Collect points by demonstrating good driving behavior (as defined by your sponsor).</p>
         </div>
         <div className="about-page__detail">
           <span className="about-page__number">02</span>
