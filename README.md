@@ -35,3 +35,7 @@ The frontend runs at:
 
 The Vite config proxies `/api` requests to the backend server.
 
+## Database setup
+
+Copy `.env.example` to `.env` and fill in the MySQL connection values. The API expects a `users` table with these columns: `user_id`, `email`, `password_hash`, `role`, `first_name`, `last_name`, and `created_at`. Make `email` unique. Passwords are hashed with bcrypt before insertion, and login state uses an HTTP-only session cookie.
+

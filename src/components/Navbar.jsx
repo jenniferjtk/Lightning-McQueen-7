@@ -7,7 +7,7 @@ const LINKS = [
   { label: 'About Page', href: '/about' },
 ];
 
-export default function Navbar({ driverName }) {
+export default function Navbar({ driverName, onLogout }) {
   return (
     <header className="navbar">
       <div className="navbar__brand">
@@ -28,6 +28,10 @@ export default function Navbar({ driverName }) {
       </nav>
 
       <div className="navbar__user">{driverName || 'Driver'}</div>
+      <button className="navbar__logout" type="button" onClick={async () => {
+        await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+        onLogout();
+      }}>Log out</button>
     </header>
   );
 }
