@@ -1,6 +1,11 @@
 import React from 'react';
 
-const LINKS = ['Dashboard', 'Point Management', 'Catalog', 'About Page'];
+const LINKS = [
+  { label: 'Dashboard', href: '/' },
+  { label: 'Point Management' },
+  { label: 'Catalog' },
+  { label: 'About Page', href: '/about' },
+];
 
 export default function Navbar({ driverName }) {
   return (
@@ -11,9 +16,13 @@ export default function Navbar({ driverName }) {
       </div>
 
       <nav className="navbar__links" aria-label="Main navigation">
-        {LINKS.map((link) => (
-          <button key={link} className="navbar__link" type="button">
-            {link}
+        {LINKS.map((link) => link.href ? (
+          <a key={link.label} className="navbar__link" href={link.href}>
+            {link.label}
+          </a>
+        ) : (
+          <button key={link.label} className="navbar__link" type="button">
+            {link.label}
           </button>
         ))}
       </nav>

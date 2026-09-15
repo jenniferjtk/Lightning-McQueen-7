@@ -3,6 +3,7 @@ import Navbar from './components/Navbar.jsx';
 import ProfileCard from './components/ProfileCard.jsx';
 import PointsCard from './components/PointsCard.jsx';
 import PurchasesTable from './components/PurchasesTable.jsx';
+import AboutPage from './components/AboutPage.jsx';
 
 const driver = {
   name: '',
@@ -13,11 +14,13 @@ const driver = {
 };
 
 export default function App() {
+  const isAboutPage = window.location.pathname === '/about';
+
   return (
     <div className="app">
       <Navbar driverName={driver.name || 'Driver'} />
 
-      <main className="dashboard">
+      {isAboutPage ? <AboutPage /> : <main className="dashboard">
         <div className="dashboard__top">
           <PointsCard points={driver.points} />
           <ProfileCard
@@ -28,7 +31,7 @@ export default function App() {
         </div>
 
         <PurchasesTable purchases={driver.recentPurchases} />
-      </main>
+      </main>}
     </div>
   );
 }
