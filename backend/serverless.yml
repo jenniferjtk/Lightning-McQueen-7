@@ -1,9 +1,13 @@
+org: jennagracejohnson3
+app: lightning-mcqueen
 service: lightning-mcqueen-backend
 
 provider:
   name: aws
   runtime: nodejs18.x
   region: us-east-2
+  deploymentBucket:
+    name: team07-lightning-mcqueen-deploy
   environment:
     DB_HOST: ${env:DB_HOST}
     DB_USER: ${env:DB_USER}
