@@ -49,3 +49,15 @@ functions:
       - httpApi:
           path: /api/auth/register
           method: post
+  applicationCreate:
+    handler: handlers/applications/create.handler
+    events:
+      - httpApi:
+          path: /api/applications
+          method: post
+  applicationStatus:
+    handler: handlers/applications/status.handler
+    events:
+      - httpApi:
+          path: /api/applications
+          method: get
