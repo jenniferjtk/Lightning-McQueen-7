@@ -6,8 +6,11 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // Forwards /api requests to the Express server during local dev.
-      '/api': 'http://localhost:4000',
+      // Forwards /api requests to the deployed Lambda/API Gateway backend.
+      '/api': {
+        target: 'https://1fpzbaz91l.execute-api.us-east-2.amazonaws.com',
+        changeOrigin: true,
+      },
     },
   },
 });
