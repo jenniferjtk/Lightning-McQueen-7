@@ -6,6 +6,8 @@ import PurchasesTable from './components/PurchasesTable.jsx';
 import AboutPage from './components/AboutPage.jsx';
 import AccountPage from './components/AccountPage.jsx';
 import PointManagementPage from './components/PointManagementPage.jsx';
+import SponsorsPage from './components/SponsorsPage.jsx';
+import MyApplicationPage from './components/MyApplicationPage.jsx';
 
 const driver = {
   name: '',
@@ -27,6 +29,8 @@ export default function App() {
     if (pathname === '/about') return 'about';
     if (pathname === '/account') return 'account';
     if (pathname === '/points') return 'points';
+    if (pathname === '/sponsors') return 'sponsors';
+    if (pathname === '/application') return 'application';
     return 'dashboard';
   });
 
@@ -44,6 +48,8 @@ export default function App() {
       about: '/about',
       account: '/account',
       points: '/points',
+      sponsors: '/sponsors',
+      application: '/application',
     };
     const path = pathMap[currentPage] || '/';
     window.history.pushState({}, '', path);
@@ -74,6 +80,10 @@ export default function App() {
         <AccountPage user={user} onProfileUpdate={handleProfileUpdate} />
       ) : currentPage === 'points' ? (
         <PointManagementPage />
+      ) : currentPage === 'sponsors' ? (
+        <SponsorsPage user={user} />
+      ) : currentPage === 'application' ? (
+        <MyApplicationPage user={user} />
       ) : (
         <main className="dashboard">
           <div className="dashboard__top">
