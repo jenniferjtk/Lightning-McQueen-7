@@ -73,6 +73,7 @@ body {
   text-decoration: none;
 }
 
+.navbar__link--active,
 .navbar__link:hover,
 .navbar__link:focus-visible {
   color: #FFFFFF;
@@ -84,6 +85,11 @@ body {
   align-items: center;
   justify-content: center;
   text-decoration: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  appearance: none;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
@@ -98,13 +104,14 @@ body {
   color: var(--color-asphalt);
   font-weight: 800;
   font-size: 0.9rem;
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.12);
+  border: none;
+  box-shadow: none;
 }
 
 .navbar__user:hover .navbar__avatar,
 .navbar__user:focus-visible .navbar__avatar {
   transform: scale(1.05);
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3);
+  box-shadow: none;
 }
 
 .dashboard {
@@ -928,11 +935,11 @@ body {
 
   .navbar__logout { margin-left: auto; }
 
-  .account-form__row {
+  .edit-account-form__row {
     grid-template-columns: 1fr;
   }
 
-  .account-form__actions {
+  .edit-account-form__actions {
     flex-direction: column;
     align-items: flex-start;
   }
