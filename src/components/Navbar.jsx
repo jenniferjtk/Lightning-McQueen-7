@@ -2,7 +2,7 @@ import React from 'react';
 
 const LINKS = [
   { label: 'Dashboard', href: '/' },
-  { label: 'Point Management' },
+  { label: 'Point Management', href: '/points' },
   { label: 'Catalog' },
   { label: 'About Page', href: '/about' },
 ];

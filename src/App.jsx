@@ -4,6 +4,7 @@ import ProfileCard from './components/ProfileCard.jsx';
 import PointsCard from './components/PointsCard.jsx';
 import PurchasesTable from './components/PurchasesTable.jsx';
 import AboutPage from './components/AboutPage.jsx';
+import PointManagementPage from './components/PointManagementPage.jsx';
 
 const driver = {
   name: '',
@@ -29,12 +30,13 @@ export default function App() {
   if (!user) return <AuthPage onAuthenticated={setUser} />;
 
   const isAboutPage = window.location.pathname === '/about';
+  const isPointManagementPage = window.location.pathname === '/points';
 
   return (
     <div className="app">
       <Navbar driverName={`${user.firstName} ${user.lastName}`} onLogout={() => setUser(null)} />
 
-      {isAboutPage ? <AboutPage /> : <main className="dashboard">
+      {isAboutPage ? <AboutPage /> : isPointManagementPage ? <PointManagementPage /> : <main className="dashboard">
         <div className="dashboard__top">
           <PointsCard points={driver.points} />
           <ProfileCard
