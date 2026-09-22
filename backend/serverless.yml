@@ -8,6 +8,16 @@ provider:
   region: us-east-2
   deploymentBucket:
     name: team07-lightning-mcqueen-deploy
+  httpApi:
+    cors:
+      allowedOrigins:
+        - http://localhost:5173
+      allowedHeaders:
+        - Content-Type
+      allowedMethods:
+        - GET
+        - POST
+      allowCredentials: true
   environment:
     DB_HOST: ${env:DB_HOST}
     DB_USER: ${env:DB_USER}
@@ -27,9 +37,15 @@ functions:
       - httpApi:
           path: /login
           method: post
+      - httpApi:
+          path: /api/auth/login
+          method: post
   register:
     handler: handlers/register.handler
     events:
       - httpApi:
           path: /register
+          method: post
+      - httpApi:
+          path: /api/auth/register
           method: post
