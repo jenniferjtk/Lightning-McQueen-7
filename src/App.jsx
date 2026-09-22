@@ -4,19 +4,23 @@ import ProfileCard from './components/ProfileCard.jsx';
 import PointsCard from './components/PointsCard.jsx';
 import PurchasesTable from './components/PurchasesTable.jsx';
 import AboutPage from './components/AboutPage.jsx';
-import PointManagementPage from './components/PointManagementPage.jsx';
+import AccountPage from './components/AccountPage.jsx';
 
 const driver = {
   name: '',
   dateJoined: '',
   sponsorName: '',
+  sponsor: null,
   points: 0,
+  balanceNotifications: [],
   recentPurchases: [],
+  savedItems: [],
 };
 
 export default function App() {
   const [user, setUser] = useState(null);
   const [checkingSession, setCheckingSession] = useState(true);
+  const [activeTab, setActiveTab] = useState('purchases');
 
   useEffect(() => {
     fetch('/api/auth/me', { credentials: 'include' })
@@ -30,23 +34,122 @@ export default function App() {
   if (!user) return <AuthPage onAuthenticated={setUser} />;
 
   const isAboutPage = window.location.pathname === '/about';
-  const isPointManagementPage = window.location.pathname === '/points';
+  const isAccountPage = window.location.pathname === '/account';
+
+  const handleProfileUpdate = (updatedUser) => {
+    setUser(updatedUser);
+  };
 
   return (
     <div className="app">
-      <Navbar driverName={`${user.firstName} ${user.lastName}`} onLogout={() => setUser(null)} />
+      <Navbar
+        driverName={`${user.firstName} ${user.lastName}`}
+        onLogout={() => setUser(null)}
+        accountHref="/account"
+      />
 
-      {isAboutPage ? <AboutPage /> : isPointManagementPage ? <PointManagementPage /> : <main className="dashboard">
+      {isAboutPage ? <AboutPage /> : isAccountPage ? (
+        <AccountPage user={user} onProfileUpdate={handleProfileUpdate} />
+      ) : (
+        <main className="dashboard">
         <div className="dashboard__top">
-          <PointsCard points={driver.points} />
-          <ProfileCard
-            name={driver.name || '—'}
-            dateJoined={driver.dateJoined || ''}
-            sponsorName={driver.sponsorName || '—'}
-          />
+          <div className="dashboard__points-column">
+            <PointsCard points={driver.points} />
+            <section className="card points-activity-card">
+              <h2 className="card__title">Recent point updates</h2>
+              {driver.balanceNotifications.length === 0 ? (
+                <p className="points-activity-card__empty">No recent point changes yet.</p>
+              ) : (
+                <ul className="points-activity-card__list">
+                  {driver.balanceNotifications.map((entry) => (
+                    <li key={entry.id} className="points-activity-card__item">
+                      <div>
+                        <p className="points-activity-card__label">{entry.label}</p>
+                        <p className="points-activity-card__date">{entry.date}</p>
+                      </div>
+                      <span className={entry.amount >= 0 ? 'points-activity-card__amount points-activity-card__amount--positive' : 'points-activity-card__amount points-activity-card__amount--negative'}>
+                        {entry.amount >= 0 ? '+' : '-'}{Math.abs(entry.amount).toLocaleString()} pts
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </div>
+
+          <div className="dashboard__profile-column">
+            <ProfileCard
+              name={driver.name || '—'}
+              dateJoined={driver.dateJoined || ''}
+              sponsorName={driver.sponsorName || '—'}
+              sponsor={driver.sponsor}
+            />
+
+            <section className="card balance-notifications-card">
+              <h2 className="card__title">Notifications</h2>
+
+              {driver.balanceNotifications.length === 0 ? (
+                <p className="balance-notifications-card__empty">Your balance updates will appear here.</p>
+              ) : (
+                <ul className="balance-notifications-card__list">
+                  {driver.balanceNotifications.map((entry) => (
+                    <li key={entry.id} className="balance-notifications-card__item">
+                      <div>
+                        <p className="balance-notifications-card__label">{entry.label}</p>
+                        <p className="balance-notifications-card__date">{entry.date}</p>
+                      </div>
+                      <span className={entry.amount >= 0 ? 'balance-notifications-card__amount balance-notifications-card__amount--positive' : 'balance-notifications-card__amount balance-notifications-card__amount--negative'}>
+                        {entry.amount >= 0 ? '+' : '-'}{Math.abs(entry.amount).toLocaleString()} pts
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </div>
         </div>
 
-        <PurchasesTable purchases={driver.recentPurchases} />
+        <section className="dashboard__panel">
+          <div className="dashboard__tabs" aria-label="Dashboard sections">
+            <button
+              type="button"
+              className={activeTab === 'purchases' ? 'dashboard__tab dashboard__tab--active' : 'dashboard__tab'}
+              onClick={() => setActiveTab('purchases')}
+            >
+              Recent Purchases
+            </button>
+            <button
+              type="button"
+              className={activeTab === 'saved' ? 'dashboard__tab dashboard__tab--active' : 'dashboard__tab'}
+              onClick={() => setActiveTab('saved')}
+            >
+              Saved Items
+            </button>
+          </div>
+
+          {activeTab === 'purchases' ? (
+            <PurchasesTable purchases={driver.recentPurchases} />
+          ) : (
+            <section className="card saved-items-card">
+              <h2 className="card__title">Saved Items</h2>
+              {driver.savedItems.length === 0 ? (
+                <p className="purchases-card__empty">No saved items yet.</p>
+              ) : (
+                <ul className="saved-items-list">
+                  {driver.savedItems.map((item) => (
+                    <li key={item.id} className="saved-items-list__item">
+                      <div>
+                        <p className="saved-items-list__name">{item.item}</p>
+                        <p className="saved-items-list__meta">Ready to redeem</p>
+                      </div>
+                      <span className="saved-items-list__points">{item.points.toLocaleString()} pts</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
+        </section>
       </main>}
     </div>
   );
