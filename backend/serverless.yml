@@ -17,6 +17,7 @@ provider:
       allowedMethods:
         - GET
         - POST
+        - PATCH
       allowCredentials: true
   environment:
     DB_HOST: ${env:DB_HOST}
@@ -60,4 +61,16 @@ functions:
     events:
       - httpApi:
           path: /api/applications
+          method: get
+  applicationWithdraw:
+    handler: handlers/applications/withdraw.handler
+    events:
+      - httpApi:
+          path: /api/applications/{applicationId}/withdraw
+          method: patch
+  sponsorsList:
+    handler: handlers/sponsors/list.handler
+    events:
+      - httpApi:
+          path: /api/sponsors
           method: get

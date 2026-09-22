@@ -17,6 +17,14 @@ module.exports.handler = async (event) => {
       return { statusCode: 400, body: JSON.stringify({ error: 'No sponsor found for that sponsorId' }) };
     }
 
+    const [existingRows] = await pool.query(
+      "SELECT application_id FROM driver_applications WHERE driver_user_id = ? AND sponsor_id = ? AND status IN ('pending', 'approved')",
+      [driverUserId, sponsorId]
+    );
+    if (existingRows.length > 0) {
+      return { statusCode: 409, body: JSON.stringify({ error: 'You already have a pending or approved application with this sponsor' }) };
+    }
+
     const [result] = await pool.query(
       'INSERT INTO driver_applications (driver_user_id, sponsor_id, status) VALUES (?, ?, ?)',
       [driverUserId, sponsorId, 'pending']

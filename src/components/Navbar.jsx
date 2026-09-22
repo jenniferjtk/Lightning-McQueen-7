@@ -2,6 +2,8 @@ import React from 'react';
 
 const LINKS = [
   { label: 'Dashboard', value: 'dashboard' },
+  { label: 'Sponsors', value: 'sponsors' },
+  { label: 'My Application', value: 'application' },
   { label: 'Point Management', value: 'points' },
   { label: 'About Page', value: 'about' },
 ];

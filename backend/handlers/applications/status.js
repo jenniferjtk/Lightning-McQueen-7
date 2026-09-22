@@ -12,7 +12,7 @@ module.exports.handler = async (event) => {
   try {
     const pool = getPool();
     const [rows] = await pool.query(
-      `SELECT a.sponsor_id, s.name AS sponsor_name, a.status, a.submitted_at
+      `SELECT a.application_id, a.sponsor_id, s.name AS sponsor_name, a.status, a.submitted_at
        FROM driver_applications a
        JOIN sponsors s ON s.sponsor_id = a.sponsor_id
        WHERE a.driver_user_id = ?
