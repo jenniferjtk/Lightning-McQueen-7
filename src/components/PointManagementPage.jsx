@@ -1,3 +1,5 @@
+//eventually I want this page editable for sponsors and view only for drivers!
+
 import React, { useState } from 'react';
 
 const createRow = (id) => ({
