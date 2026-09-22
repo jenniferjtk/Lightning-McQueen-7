@@ -12,12 +12,18 @@ module.exports.handler = async (event) => {
     const passwordHash = await bcrypt.hash(password, 10); // 10 = salt rounds
 
     const pool = getPool();
-    await pool.query(
+    const [result] = await pool.query(
       'INSERT INTO users (email, password_hash, role, first_name, last_name) VALUES (?, ?, ?, ?, ?)',
       [email, passwordHash, role, firstName, lastName]
     );
 
-    return { statusCode: 201, body: JSON.stringify({ message: 'User created' }) };
+    return {
+      statusCode: 201,
+      body: JSON.stringify({
+        message: 'User created',
+        user: { id: result.insertId, email, role, firstName, lastName },
+      }),
+    };
   } catch (err) {
     return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
   }

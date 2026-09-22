@@ -16,7 +16,15 @@ module.exports.handler = async (event) => {
     }
     return {
       statusCode: 200,
-      body: JSON.stringify({ userId: user.user_id, role: user.role }),
+      body: JSON.stringify({
+        user: {
+          id: user.user_id,
+          email: user.email,
+          role: user.role,
+          firstName: user.first_name,
+          lastName: user.last_name,
+        },
+      }),
     };
   } catch (err) {
     return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
