@@ -7,7 +7,7 @@ export default function AboutPage() {
         <p className="about-page__eyebrow">Lightning McQueen</p>
         <h1>Good Driver Incentive Program</h1>
         <p className="about-page__summary">
-          Team 07 | Sprint 01 | Released 09/15/2026
+          Team 07 | Sprint 02 | Released 09/22/2026
         </p>
       </section>
 
