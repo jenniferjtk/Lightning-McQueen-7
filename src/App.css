@@ -549,6 +549,10 @@ body {
 .auth-form label { display: flex; flex-direction: column; gap: 0.4rem; color: var(--color-slate); font-size: 0.8rem; font-weight: 700; }
 .auth-form input { width: 100%; border: 1px solid #c9c6bd; border-radius: 4px; background: #fff; color: var(--color-ink); font: inherit; font-weight: 400; padding: 0.75rem; }
 .auth-form input:focus { outline: 2px solid var(--color-steel); outline-offset: 1px; }
+.auth-form__password-field { position: relative; display: block; }
+.auth-form__password-field input { padding-right: 4rem; }
+.auth-form__password-toggle { position: absolute; top: 50%; right: 0.65rem; transform: translateY(-50%); border: 0; background: transparent; color: var(--color-steel); cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 700; padding: 0.25rem; }
+.auth-form__password-toggle:focus-visible { outline: 2px solid var(--color-steel); outline-offset: 2px; }
 .auth-form__row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; }
 .auth-form__submit { border: 0; border-radius: 4px; background: var(--color-asphalt); color: #fff; cursor: pointer; font: inherit; font-weight: 700; padding: 0.85rem; }
 .auth-form__submit:hover { background: var(--color-steel); }

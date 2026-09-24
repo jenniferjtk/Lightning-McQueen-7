@@ -195,6 +195,7 @@ function AuthPage({ onAuthenticated }) {
   const [form, setForm] = useState({ email: '', password: '', firstName: '', lastName: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const updateField = (event) => setForm({ ...form, [event.target.name]: event.target.value });
 
@@ -234,7 +235,14 @@ function AuthPage({ onAuthenticated }) {
             <label>Last name<input name="lastName" value={form.lastName} onChange={updateField} autoComplete="family-name" required /></label>
           </div>}
           <label>Email address<input type="email" name="email" value={form.email} onChange={updateField} autoComplete="email" required /></label>
-          <label>Password<input type="password" name="password" value={form.password} onChange={updateField} autoComplete={isRegistering ? 'new-password' : 'current-password'} required /></label>
+          <label>Password
+            <span className="auth-form__password-field">
+              <input type={showPassword ? 'text' : 'password'} name="password" value={form.password} onChange={updateField} autoComplete={isRegistering ? 'new-password' : 'current-password'} required />
+              <button className="auth-form__password-toggle" type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? 'Hide password' : 'Show password'}>
+                {showPassword ? 'Hide' : 'Show'}
+              </button>
+            </span>
+          </label>
           {error && <p className="auth-form__error" role="alert">{error}</p>}
           <button className="auth-form__submit" type="submit" disabled={loading}>{loading ? 'Please wait...' : isRegistering ? 'Create account' : 'Log in'}</button>
         </form>
