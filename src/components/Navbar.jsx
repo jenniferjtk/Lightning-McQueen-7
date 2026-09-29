@@ -10,6 +10,7 @@ const DRIVER_LINKS = [
 
 const ADMIN_LINKS = [
   { label: 'Admin Home', value: 'admin' },
+  { label: 'Drivers', value: 'drivers' },
   { label: 'Point Management', value: 'points' },
   { label: 'Sponsors', value: 'sponsors' },
   { label: 'About Page', value: 'about' },

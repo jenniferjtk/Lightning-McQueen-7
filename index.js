@@ -41,6 +41,28 @@ const publicUser = (user) => ({
   lastName: user.last_name,
 });
 
+const adminDriver = (user) => ({
+  id: user.user_id,
+  email: user.email,
+  firstName: user.first_name,
+  lastName: user.last_name,
+  createdAt: user.created_at,
+});
+
+const validEmail = (email) => typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+const requireAdmin = async (req, res, next) => {
+  if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
+  try {
+    const [rows] = await pool.execute('SELECT role FROM users WHERE user_id = ?', [req.session.userId]);
+    if (rows[0]?.role !== 'admin') return res.status(403).json({ message: 'Administrator access is required.' });
+    return next();
+  } catch (error) {
+    console.error('Admin authorization failed:', error.message);
+    return res.status(500).json({ message: 'Unable to authorize this request.' });
+  }
+};
+
 app.get('/api/auth/me', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
 
@@ -113,6 +135,79 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.post('/api/auth/logout', (req, res) => {
   req.session.destroy(() => res.status(204).end());
+});
+
+app.get('/api/admin/drivers', requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT user_id, email, first_name, last_name, created_at
+       FROM users WHERE role = 'driver' ORDER BY created_at DESC, user_id DESC`,
+    );
+    return res.json({ drivers: rows.map(adminDriver) });
+  } catch (error) {
+    console.error('Driver list failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load driver accounts.' });
+  }
+});
+
+app.post('/api/admin/drivers', requireAdmin, async (req, res) => {
+  const { email, password, firstName, lastName } = req.body;
+  if (!validEmail(email) || !password || !firstName?.trim() || !lastName?.trim()) {
+    return res.status(400).json({ message: 'A first name, last name, valid email, and password are required.' });
+  }
+  if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters.' });
+  try {
+    const passwordHash = await bcrypt.hash(password, 12);
+    const [result] = await pool.execute(
+      `INSERT INTO users (email, password_hash, role, first_name, last_name, created_at)
+       VALUES (?, ?, 'driver', ?, ?, NOW())`,
+      [email.trim().toLowerCase(), passwordHash, firstName.trim(), lastName.trim()],
+    );
+    const [rows] = await pool.execute('SELECT user_id, email, first_name, last_name, created_at FROM users WHERE user_id = ?', [result.insertId]);
+    return res.status(201).json({ driver: adminDriver(rows[0]) });
+  } catch (error) {
+    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ message: 'An account with that email already exists.' });
+    console.error('Driver creation failed:', error.message);
+    return res.status(500).json({ message: 'Unable to create the driver account.' });
+  }
+});
+
+app.put('/api/admin/drivers/:driverId', requireAdmin, async (req, res) => {
+  const driverId = Number(req.params.driverId);
+  const { email, firstName, lastName } = req.body;
+  if (!Number.isInteger(driverId) || driverId < 1 || !validEmail(email) || !firstName?.trim() || !lastName?.trim()) {
+    return res.status(400).json({ message: 'A first name, last name, and valid email are required.' });
+  }
+  try {
+    const [result] = await pool.execute(
+      `UPDATE users SET email = ?, first_name = ?, last_name = ?
+       WHERE user_id = ? AND role = 'driver'`,
+      [email.trim().toLowerCase(), firstName.trim(), lastName.trim(), driverId],
+    );
+    if (!result.affectedRows) return res.status(404).json({ message: 'Driver account not found.' });
+    const [rows] = await pool.execute('SELECT user_id, email, first_name, last_name, created_at FROM users WHERE user_id = ?', [driverId]);
+    return res.json({ driver: adminDriver(rows[0]) });
+  } catch (error) {
+    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ message: 'An account with that email already exists.' });
+    console.error('Driver update failed:', error.message);
+    return res.status(500).json({ message: 'Unable to update the driver account.' });
+  }
+});
+
+app.delete('/api/admin/drivers/:driverId', requireAdmin, async (req, res) => {
+  const driverId = Number(req.params.driverId);
+  if (!Number.isInteger(driverId) || driverId < 1) return res.status(400).json({ message: 'Invalid driver account.' });
+  try {
+    const [result] = await pool.execute("DELETE FROM users WHERE user_id = ? AND role = 'driver'", [driverId]);
+    if (!result.affectedRows) return res.status(404).json({ message: 'Driver account not found.' });
+    return res.status(204).end();
+  } catch (error) {
+    if (error.code === 'ER_ROW_IS_REFERENCED_2') {
+      return res.status(409).json({ message: 'This driver has related records and cannot be deleted.' });
+    }
+    console.error('Driver deletion failed:', error.message);
+    return res.status(500).json({ message: 'Unable to delete the driver account.' });
+  }
 });
 
 // Placeholder shape — replace with a real database query keyed off the

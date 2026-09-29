@@ -18,13 +18,6 @@ export default function AdminHomePage({ user, onPageChange }) {
           <p>Create, update, or delete driver profiles and their associated information.</p>
           <button type="button" onClick={() => onPageChange('drivers')}>Open driver management</button>
         </article>
-
-        <article className="admin-action-card">
-          <p className="admin-action-card__label">User Log</p>
-          <h2>View Log of Created Users</h2>
-          <p>Review the log of all users created in the system.</p>
-          <button type="button" onClick={() => onPageChange('user-log')}>View user log</button>
-        </article>
       </section>
     </main>
   );

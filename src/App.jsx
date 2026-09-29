@@ -9,6 +9,7 @@ import PointManagementPage from './components/PointManagementPage.jsx';
 import SponsorsPage from './components/SponsorsPage.jsx';
 import MyApplicationPage from './components/MyApplicationPage.jsx';
 import AdminHomePage from './components/AdminHomePage.jsx';
+import AdminDriversPage from './components/AdminDriversPage.jsx';
 
 const driver = {
   name: '',
@@ -33,6 +34,7 @@ export default function App() {
     if (pathname === '/sponsors') return 'sponsors';
     if (pathname === '/application') return 'application';
     if (pathname === '/admin') return 'admin';
+    if (pathname === '/admin/drivers') return 'drivers';
     return 'dashboard';
   });
 
@@ -53,6 +55,7 @@ export default function App() {
       sponsors: '/sponsors',
       application: '/application',
       admin: '/admin',
+      drivers: '/admin/drivers',
     };
     const path = pathMap[currentPage] || '/';
     window.history.pushState({}, '', path);
@@ -65,7 +68,8 @@ export default function App() {
     setUser(updatedUser);
   };
   const isAdmin = user.role === 'admin';
-  const visiblePage = !isAdmin && currentPage === 'admin' ? 'dashboard' : currentPage;
+  const adminPages = ['admin', 'drivers', 'user-log'];
+  const visiblePage = !isAdmin && adminPages.includes(currentPage) ? 'dashboard' : currentPage;
 
   return (
     <div className="app">
@@ -82,6 +86,8 @@ export default function App() {
 
       {visiblePage === 'admin' ? (
         <AdminHomePage user={user} onPageChange={setCurrentPage} />
+      ) : visiblePage === 'drivers' ? (
+        <AdminDriversPage />
       ) : visiblePage === 'about' ? (
         <AboutPage />
       ) : visiblePage === 'account' ? (

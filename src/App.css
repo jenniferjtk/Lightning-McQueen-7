@@ -610,6 +610,38 @@ body {
 .admin-action-card button { background: var(--color-asphalt); border: 0; border-radius: 5px; color: #fff; cursor: pointer; font: inherit; font-weight: 700; margin-top: auto; padding: 0.7rem 0.8rem; text-align: left; }
 .admin-action-card button:hover, .admin-action-card button:focus-visible { background: var(--color-steel); }
 
+.admin-drivers-page { max-width: 1100px; margin: 0 auto; padding: 3rem 1.5rem 4rem; }
+.admin-drivers-page__intro { align-items: end; display: flex; gap: 1rem; justify-content: space-between; margin-bottom: 2rem; }
+.admin-drivers-page__intro h1 { font-size: clamp(2rem, 5vw, 3rem); margin: 0; }
+.admin-drivers-page__intro p:not(.admin-home-page__eyebrow) { color: var(--color-slate); margin: 0.75rem 0 0; }
+.admin-drivers-page__count { color: var(--color-steel) !important; font-family: var(--font-mono); font-size: 0.85rem; font-weight: 700; white-space: nowrap; }
+.admin-drivers-page__message { border-radius: 6px; margin: 0 0 1rem; padding: 0.8rem 1rem; }
+.admin-drivers-page__message--error { background: #f9e4e1; color: #a2382b; }
+.admin-drivers-page__message--success { background: #e2f1e6; color: #256b42; }
+.admin-driver-create, .admin-driver-list { margin-bottom: 1.25rem; padding: 1.5rem; }
+.admin-driver-form { align-items: end; display: grid; gap: 0.9rem; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; }
+.admin-driver-form label, .admin-driver-edit label, .admin-driver-list__search { color: var(--color-slate); display: flex; flex-direction: column; font-size: 0.78rem; font-weight: 700; gap: 0.4rem; }
+.admin-driver-form input, .admin-driver-edit input, .admin-driver-list__search input { border: 1px solid #c9c6bd; border-radius: 4px; font: inherit; padding: 0.7rem; }
+.admin-driver-form button, .admin-driver-edit button, .admin-driver-table__actions button { background: var(--color-asphalt); border: 0; border-radius: 4px; color: #fff; cursor: pointer; font: inherit; font-weight: 700; padding: 0.72rem 0.85rem; }
+.admin-driver-form button:hover, .admin-driver-edit button:hover, .admin-driver-table__actions button:hover { background: var(--color-steel); }
+.admin-driver-form button:disabled, .admin-driver-edit button:disabled, .admin-driver-table__actions button:disabled { cursor: wait; opacity: 0.7; }
+.admin-driver-list__header { align-items: end; display: flex; gap: 1rem; justify-content: space-between; margin-bottom: 1.25rem; }
+.admin-driver-list__header .card__title { margin: 0; }
+.admin-driver-list__search { width: min(100%, 280px); }
+.admin-driver-list__table-wrap { overflow-x: auto; }
+.admin-driver-table { border-collapse: collapse; min-width: 720px; width: 100%; }
+.admin-driver-table th { border-bottom: 1px solid var(--color-line); color: var(--color-slate); font-size: 0.78rem; padding: 0 0.5rem 0.6rem; text-align: left; text-transform: uppercase; }
+.admin-driver-table td { border-bottom: 1px solid var(--color-line); padding: 0.85rem 0.5rem; }
+.admin-driver-table th:first-child, .admin-driver-table td:first-child { padding-left: 0; }
+.admin-driver-table th:last-child, .admin-driver-table td:last-child { padding-right: 0; text-align: right; }
+.admin-driver-table__actions { white-space: nowrap; }
+.admin-driver-table__actions button + button { margin-left: 0.5rem; }
+.admin-driver-button--delete { background: #a2382b !important; }
+.admin-driver-button--delete:hover { background: #7d251c !important; }
+.admin-driver-button--secondary { background: transparent !important; border: 1px solid var(--color-line) !important; color: var(--color-ink) !important; }
+.admin-driver-edit { align-items: end; display: grid; gap: 0.75rem; grid-template-columns: repeat(3, minmax(0, 1fr)) auto auto; padding: 0.25rem 0; }
+.sr-only { height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; width: 1px; clip: rect(0, 0, 0, 0); }
+
 .account-page {
   max-width: 760px;
   margin: 0 auto;
@@ -1040,6 +1072,25 @@ body {
 
   .admin-home-page__actions {
     grid-template-columns: 1fr;
+  }
+
+  .admin-drivers-page {
+    padding-top: 2.5rem;
+  }
+
+  .admin-drivers-page__intro,
+  .admin-driver-list__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .admin-driver-form,
+  .admin-driver-edit {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-driver-list__search {
+    width: 100%;
   }
 }
 

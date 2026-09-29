@@ -6,9 +6,10 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // Forwards /api requests to the deployed Lambda/API Gateway backend.
+      // The local Express API owns authentication and the admin driver routes.
+      // Keeping this local also makes it use the same database configured in .env.
       '/api': {
-        target: 'https://1fpzbaz91l.execute-api.us-east-2.amazonaws.com',
+        target: 'http://localhost:4000',
         changeOrigin: true,
       },
     },
