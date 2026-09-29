@@ -8,6 +8,7 @@ import AccountPage from './components/AccountPage.jsx';
 import PointManagementPage from './components/PointManagementPage.jsx';
 import SponsorsPage from './components/SponsorsPage.jsx';
 import MyApplicationPage from './components/MyApplicationPage.jsx';
+import AdminHomePage from './components/AdminHomePage.jsx';
 
 const driver = {
   name: '',
@@ -31,6 +32,7 @@ export default function App() {
     if (pathname === '/points') return 'points';
     if (pathname === '/sponsors') return 'sponsors';
     if (pathname === '/application') return 'application';
+    if (pathname === '/admin') return 'admin';
     return 'dashboard';
   });
 
@@ -50,6 +52,7 @@ export default function App() {
       points: '/points',
       sponsors: '/sponsors',
       application: '/application',
+      admin: '/admin',
     };
     const path = pathMap[currentPage] || '/';
     window.history.pushState({}, '', path);
@@ -61,12 +64,15 @@ export default function App() {
   const handleProfileUpdate = (updatedUser) => {
     setUser(updatedUser);
   };
+  const isAdmin = user.role === 'admin';
+  const visiblePage = !isAdmin && currentPage === 'admin' ? 'dashboard' : currentPage;
 
   return (
     <div className="app">
       <Navbar
         driverName={`${user.firstName} ${user.lastName}`}
-        currentPage={currentPage}
+        userRole={user.role}
+        currentPage={visiblePage}
         onPageChange={setCurrentPage}
         onLogout={() => {
           setUser(null);
@@ -74,15 +80,17 @@ export default function App() {
         }}
       />
 
-      {currentPage === 'about' ? (
+      {visiblePage === 'admin' ? (
+        <AdminHomePage user={user} onPageChange={setCurrentPage} />
+      ) : visiblePage === 'about' ? (
         <AboutPage />
-      ) : currentPage === 'account' ? (
+      ) : visiblePage === 'account' ? (
         <AccountPage user={user} onProfileUpdate={handleProfileUpdate} />
-      ) : currentPage === 'points' ? (
+      ) : visiblePage === 'points' ? (
         <PointManagementPage />
-      ) : currentPage === 'sponsors' ? (
+      ) : visiblePage === 'sponsors' ? (
         <SponsorsPage user={user} />
-      ) : currentPage === 'application' ? (
+      ) : visiblePage === 'application' ? (
         <MyApplicationPage user={user} />
       ) : (
         <main className="dashboard">

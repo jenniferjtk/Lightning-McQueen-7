@@ -1,6 +1,6 @@
 import React from 'react';
 
-const LINKS = [
+const DRIVER_LINKS = [
   { label: 'Dashboard', value: 'dashboard' },
   { label: 'Sponsors', value: 'sponsors' },
   { label: 'My Application', value: 'application' },
@@ -8,8 +8,16 @@ const LINKS = [
   { label: 'About Page', value: 'about' },
 ];
 
-export default function Navbar({ driverName, currentPage, onPageChange, onLogout }) {
+const ADMIN_LINKS = [
+  { label: 'Admin Home', value: 'admin' },
+  { label: 'Point Management', value: 'points' },
+  { label: 'Sponsors', value: 'sponsors' },
+  { label: 'About Page', value: 'about' },
+];
+
+export default function Navbar({ driverName, userRole, currentPage, onPageChange, onLogout }) {
   const initials = (driverName || 'Driver').trim().split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('') || 'D';
+  const links = userRole === 'admin' ? ADMIN_LINKS : DRIVER_LINKS;
 
   return (
     <header className="navbar">
@@ -19,7 +27,7 @@ export default function Navbar({ driverName, currentPage, onPageChange, onLogout
       </div>
 
       <nav className="navbar__links" aria-label="Main navigation">
-        {LINKS.map((link) => (
+        {links.map((link) => (
           <button
             key={link.value}
             type="button"
