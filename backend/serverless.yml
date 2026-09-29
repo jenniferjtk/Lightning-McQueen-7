@@ -71,6 +71,12 @@ functions:
       - httpApi:
           path: /api/applications/{applicationId}/withdraw
           method: patch
+  applicationDecide:
+    handler: handlers/applications/decide.handler
+    events:
+      - httpApi:
+          path: /api/applications/{applicationId}/decide
+          method: patch
   sponsorsList:
     handler: handlers/sponsors/list.handler
     events:
