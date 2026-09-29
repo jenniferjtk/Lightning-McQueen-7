@@ -14,6 +14,11 @@ export default function AccountPage({ user, onProfileUpdate }) {
     country: user?.country || 'United States',
   });
   const [saved, setSaved] = useState(false);
+  const [activeTab, setActiveTab] = useState('account');
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [passwordMessage, setPasswordMessage] = useState('');
+  const [passwordError, setPasswordError] = useState(false);
+  const [passwordSaving, setPasswordSaving] = useState(false);
 
   useEffect(() => {
     setForm({
@@ -43,6 +48,45 @@ export default function AccountPage({ user, onProfileUpdate }) {
     setSaved(true);
   };
 
+  const updatePasswordField = (event) => {
+    const { name, value } = event.target;
+    setPasswordForm((current) => ({ ...current, [name]: value }));
+    setPasswordMessage('');
+  };
+
+  const changePassword = async (event) => {
+    event.preventDefault();
+    setPasswordMessage('');
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setPasswordError(true);
+      setPasswordMessage('New passwords do not match.');
+      return;
+    }
+
+    setPasswordSaving(true);
+    try {
+      const response = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          currentPassword: passwordForm.currentPassword,
+          newPassword: passwordForm.newPassword,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to update your password.');
+      setPasswordError(false);
+      setPasswordMessage(data.message || 'Password updated successfully.');
+      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    } catch (error) {
+      setPasswordError(true);
+      setPasswordMessage(error.message);
+    } finally {
+      setPasswordSaving(false);
+    }
+  };
+
   return (
     <main className="account-page">
       <section className="account-card">
@@ -54,8 +98,50 @@ export default function AccountPage({ user, onProfileUpdate }) {
           <span className="account-card__badge">Active</span>
         </div>
 
-        <form className="edit-account-form" onSubmit={submit}>
-          <div className="edit-account-form__group">
+        <div className="edit-account-form">
+          <div className="account-tabs" role="tablist" aria-label="Account details">
+            <button
+              id="account-tab"
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'account'}
+              aria-controls="account-panel"
+              className={activeTab === 'account' ? 'account-tabs__tab account-tabs__tab--active' : 'account-tabs__tab'}
+              onClick={() => setActiveTab('account')}
+            >
+              Account information
+            </button>
+            <button
+              id="shipping-tab"
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'shipping'}
+              aria-controls="shipping-panel"
+              className={activeTab === 'shipping' ? 'account-tabs__tab account-tabs__tab--active' : 'account-tabs__tab'}
+              onClick={() => setActiveTab('shipping')}
+            >
+              Shipping address
+            </button>
+            <button
+              id="points-tab"
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'points'}
+              aria-controls="points-panel"
+              className={activeTab === 'points' ? 'account-tabs__tab account-tabs__tab--active' : 'account-tabs__tab'}
+              onClick={() => setActiveTab('points')}
+            >
+              Points
+            </button>
+          </div>
+
+          <div
+            id="account-panel"
+            role="tabpanel"
+            aria-labelledby="account-tab"
+            hidden={activeTab !== 'account'}
+            className="edit-account-form__group"
+          >
             <h2>Account information</h2>
             <div className="edit-account-form__row">
               <label>
@@ -82,9 +168,64 @@ export default function AccountPage({ user, onProfileUpdate }) {
               Sponsor
               <input name="sponsorName" value={form.sponsorName} onChange={updateField} placeholder="Sponsor name" />
             </label>
+
+            <form className="password-change" onSubmit={changePassword}>
+              <h3>Change password</h3>
+              <label>
+                Current password
+                <input
+                  type="password"
+                  name="currentPassword"
+                  value={passwordForm.currentPassword}
+                  onChange={updatePasswordField}
+                  autoComplete="current-password"
+                  required
+                />
+              </label>
+              <div className="edit-account-form__row">
+                <label>
+                  New password
+                  <input
+                    type="password"
+                    name="newPassword"
+                    value={passwordForm.newPassword}
+                    onChange={updatePasswordField}
+                    autoComplete="new-password"
+                    minLength={8}
+                    required
+                  />
+                </label>
+                <label>
+                  Confirm new password
+                  <input
+                    type="password"
+                    name="confirmPassword"
+                    value={passwordForm.confirmPassword}
+                    onChange={updatePasswordField}
+                    autoComplete="new-password"
+                    minLength={8}
+                    required
+                  />
+                </label>
+              </div>
+              {passwordMessage && (
+                <p className={passwordError ? 'password-change__message password-change__message--error' : 'password-change__message'} role={passwordError ? 'alert' : 'status'}>
+                  {passwordMessage}
+                </p>
+              )}
+              <button className="edit-account-form__submit" type="submit" disabled={passwordSaving}>
+                {passwordSaving ? 'Updating password...' : 'Update password'}
+              </button>
+            </form>
           </div>
 
-          <div className="edit-account-form__group">
+          <div
+            id="shipping-panel"
+            role="tabpanel"
+            aria-labelledby="shipping-tab"
+            hidden={activeTab !== 'shipping'}
+            className="edit-account-form__group"
+          >
             <h2>Shipping address</h2>
             <label>
               Street address
@@ -114,13 +255,27 @@ export default function AccountPage({ user, onProfileUpdate }) {
             </div>
           </div>
 
-          {saved && <p className="edit-account-form__success">Account updated.</p>}
+          <section
+            id="points-panel"
+            role="tabpanel"
+            aria-labelledby="points-tab"
+            hidden={activeTab !== 'points'}
+            className="edit-account-form__group account-points"
+          >
+            <h2>Points balance</h2>
+            <p className="account-points__value" aria-label="Points balance unavailable">— <span>pts</span></p>
+            <p className="account-points__message">Your points balance is not available yet.</p>
+          </section>
 
-          <div className="edit-account-form__actions">
-            <button className="edit-account-form__submit" type="submit">Save account</button>
-            <a className="edit-account-form__secondary" href="/">Back to dashboard</a>
-          </div>
-        </form>
+          {saved && activeTab !== 'points' && <p className="edit-account-form__success">Account updated.</p>}
+
+          {activeTab !== 'points' && (
+            <div className="edit-account-form__actions">
+              <button className="edit-account-form__submit" type="button" onClick={submit}>Save account</button>
+              <a className="edit-account-form__secondary" href="/">Back to dashboard</a>
+            </div>
+          )}
+        </div>
       </section>
     </main>
   );
