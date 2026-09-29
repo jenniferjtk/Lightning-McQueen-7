@@ -194,6 +194,32 @@ app.put('/api/admin/drivers/:driverId', requireAdmin, async (req, res) => {
   }
 });
 
+app.put('/api/admin/drivers/:driverId/password', requireAdmin, async (req, res) => {
+  const driverId = Number(req.params.driverId);
+  const { password } = req.body;
+  if (!Number.isSafeInteger(driverId) || driverId < 1) {
+    return res.status(400).json({ message: 'Invalid driver account.' });
+  }
+  if (typeof password !== 'string' || password.length < 8) {
+    return res.status(400).json({ message: 'Password must be at least 8 characters.' });
+  }
+  if (Buffer.byteLength(password, 'utf8') > 72) {
+    return res.status(400).json({ message: 'Password must be 72 bytes or fewer.' });
+  }
+  try {
+    const passwordHash = await bcrypt.hash(password, 12);
+    const [result] = await pool.execute(
+      "UPDATE users SET password_hash = ? WHERE user_id = ? AND role = 'driver'",
+      [passwordHash, driverId],
+    );
+    if (!result.affectedRows) return res.status(404).json({ message: 'Driver account not found.' });
+    return res.json({ message: 'Driver password reset.' });
+  } catch (error) {
+    console.error('Driver password reset failed:', error.message);
+    return res.status(500).json({ message: 'Unable to reset the driver password.' });
+  }
+});
+
 app.delete('/api/admin/drivers/:driverId', requireAdmin, async (req, res) => {
   const driverId = Number(req.params.driverId);
   if (!Number.isInteger(driverId) || driverId < 1) return res.status(400).json({ message: 'Invalid driver account.' });

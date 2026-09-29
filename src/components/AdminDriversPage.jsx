@@ -12,6 +12,9 @@ export default function AdminDriversPage() {
   const [editingId, setEditingId] = useState(null);
   const [editDriver, setEditDriver] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [resettingId, setResettingId] = useState(null);
+  const [resetPassword, setResetPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
 
   const loadDrivers = async () => {
     setLoading(true);
@@ -67,6 +70,9 @@ export default function AdminDriversPage() {
   };
 
   const beginEdit = (driver) => {
+    setResettingId(null);
+    setResetPassword('');
+    setConfirmPassword('');
     setEditingId(driver.id);
     setEditDriver({ firstName: driver.firstName, lastName: driver.lastName, email: driver.email });
     setError('');
@@ -117,6 +123,36 @@ export default function AdminDriversPage() {
     }
   };
 
+  const resetDriverPassword = async (event, driver) => {
+    event.preventDefault();
+    setError('');
+    setNotice('');
+    if (resetPassword !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+    if (!window.confirm(`Reset ${driver.firstName} ${driver.lastName}'s password?`)) return;
+    setSaving(true);
+    try {
+      const response = await fetch(`/api/admin/drivers/${driver.id}/password`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ password: resetPassword }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to reset the password.');
+      setResettingId(null);
+      setResetPassword('');
+      setConfirmPassword('');
+      setNotice(`Password reset for ${driver.firstName} ${driver.lastName}.`);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <main className="admin-drivers-page">
       <section className="admin-drivers-page__intro">
@@ -154,7 +190,17 @@ export default function AdminDriversPage() {
           <div className="admin-driver-list__table-wrap">
             <table className="admin-driver-table">
               <thead><tr><th>Driver</th><th>Email</th><th>Joined</th><th><span className="sr-only">Actions</span></th></tr></thead>
-              <tbody>{filteredDrivers.map((driver) => editingId === driver.id ? (
+              <tbody>{filteredDrivers.map((driver) => resettingId === driver.id ? (
+                <tr key={driver.id} className="admin-driver-table__edit-row"><td colSpan="4">
+                  <form className="admin-driver-edit" onSubmit={(event) => resetDriverPassword(event, driver)}>
+                    <span>Reset password for {driver.firstName} {driver.lastName}</span>
+                    <label>New password<input type="password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} minLength="8" autoComplete="new-password" disabled={saving} required autoFocus /></label>
+                    <label>Confirm password<input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} minLength="8" autoComplete="new-password" disabled={saving} required /></label>
+                    <button type="submit" disabled={saving}>{saving ? 'Resetting...' : 'Reset password'}</button>
+                    <button type="button" className="admin-driver-button--secondary" disabled={saving} onClick={() => { setResettingId(null); setResetPassword(''); setConfirmPassword(''); }}>Cancel</button>
+                  </form>
+                </td></tr>
+              ) : editingId === driver.id ? (
                 <tr key={driver.id} className="admin-driver-table__edit-row"><td colSpan="4">
                   <form className="admin-driver-edit" onSubmit={saveEdit}>
                     <label>First name<input value={editDriver.firstName} onChange={(event) => setEditDriver((current) => ({ ...current, firstName: event.target.value }))} required /></label>
@@ -165,7 +211,7 @@ export default function AdminDriversPage() {
                   </form>
                 </td></tr>
               ) : (
-                <tr key={driver.id}><td>{driver.firstName} {driver.lastName}</td><td>{driver.email}</td><td>{driver.createdAt ? new Date(driver.createdAt).toLocaleDateString() : '—'}</td><td className="admin-driver-table__actions"><button type="button" onClick={() => beginEdit(driver)}>Edit</button><button type="button" className="admin-driver-button--delete" onClick={() => deleteDriver(driver)} disabled={saving}>Delete</button></td></tr>
+                <tr key={driver.id}><td>{driver.firstName} {driver.lastName}</td><td>{driver.email}</td><td>{driver.createdAt ? new Date(driver.createdAt).toLocaleDateString() : '—'}</td><td className="admin-driver-table__actions"><button type="button" onClick={() => beginEdit(driver)} disabled={saving}>Edit</button><button type="button" disabled={saving} onClick={() => { setEditingId(null); setEditDriver(null); setResettingId(driver.id); setResetPassword(''); setConfirmPassword(''); setError(''); setNotice(''); }}>Reset password</button><button type="button" className="admin-driver-button--delete" onClick={() => deleteDriver(driver)} disabled={saving}>Delete</button></td></tr>
               ))}</tbody>
             </table>
           </div>
