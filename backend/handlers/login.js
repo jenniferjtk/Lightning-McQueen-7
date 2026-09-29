@@ -23,6 +23,7 @@ module.exports.handler = async (event) => {
           role: user.role,
           firstName: user.first_name,
           lastName: user.last_name,
+          sponsorId: user.sponsor_id ?? null,
         },
       }),
     };

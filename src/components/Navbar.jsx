@@ -16,9 +16,16 @@ const ADMIN_LINKS = [
   { label: 'About Page', value: 'about' },
 ];
 
-export default function Navbar({ driverName, userRole, currentPage, onPageChange, onLogout }) {
+const SPONSOR_LINKS = [
+  { label: 'Dashboard', value: 'dashboard' },
+  { label: 'Applications', value: 'sponsor-applications', showsPendingCount: true },
+  { label: 'Point Management', value: 'points' },
+  { label: 'About Page', value: 'about' },
+];
+
+export default function Navbar({ driverName, userRole, currentPage, pendingCount = 0, onPageChange, onLogout }) {
   const initials = (driverName || 'Driver').trim().split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('') || 'D';
-  const links = userRole === 'admin' ? ADMIN_LINKS : DRIVER_LINKS;
+  const links = userRole === 'admin' ? ADMIN_LINKS : userRole === 'sponsor' ? SPONSOR_LINKS : DRIVER_LINKS;
 
   return (
     <header className="navbar">
@@ -36,6 +43,9 @@ export default function Navbar({ driverName, userRole, currentPage, onPageChange
             onClick={() => onPageChange(link.value)}
           >
             {link.label}
+            {link.showsPendingCount && pendingCount > 0 && (
+              <span className="navbar__badge" aria-label={`${pendingCount} pending`}>{pendingCount}</span>
+            )}
           </button>
         ))}
       </nav>

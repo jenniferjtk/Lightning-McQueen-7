@@ -21,7 +21,9 @@ module.exports.handler = async (event) => {
       statusCode: 201,
       body: JSON.stringify({
         message: 'User created',
-        user: { id: result.insertId, email, role, firstName, lastName },
+        // Self-registration never links an organization; sponsor users get
+        // sponsor_id set when their account is created by an admin/SQL.
+        user: { id: result.insertId, email, role, firstName, lastName, sponsorId: null },
       }),
     };
   } catch (err) {
