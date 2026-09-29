@@ -693,6 +693,39 @@ body {
   gap: 1.5rem;
 }
 
+.account-tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.account-tabs__tab {
+  border: 0;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -1px;
+  padding: 0.8rem 1rem;
+  background: transparent;
+  color: var(--color-slate);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.account-tabs__tab:hover,
+.account-tabs__tab:focus-visible {
+  color: var(--color-ink);
+}
+
+.account-tabs__tab--active {
+  border-bottom-color: var(--color-amber);
+  color: var(--color-ink);
+}
+
+.edit-account-form__group[hidden] {
+  display: none;
+}
+
 .edit-account-form__group {
   display: flex;
   flex-direction: column;
@@ -707,6 +740,30 @@ body {
   margin: 0 0 0.25rem;
   font-size: 1rem;
   color: var(--color-asphalt);
+}
+
+.account-points {
+  min-height: 180px;
+  justify-content: center;
+}
+
+.account-points__value {
+  margin: 0;
+  color: var(--color-steel);
+  font-family: var(--font-mono);
+  font-size: 2.25rem;
+  font-weight: 700;
+}
+
+.account-points__value span {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.account-points__message {
+  margin: 0;
+  color: var(--color-slate);
+  font-size: 0.9rem;
 }
 
 .edit-account-form__row {
@@ -738,6 +795,32 @@ body {
   border-color: var(--color-steel);
 }
 
+.password-change {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 0.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--color-line);
+}
+
+.password-change h3 {
+  margin: 0;
+  color: var(--color-asphalt);
+  font-size: 0.95rem;
+}
+
+.password-change__message {
+  margin: 0;
+  color: #1f6d3d;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.password-change__message--error {
+  color: #a2382b;
+}
+
 .edit-account-form__success {
   margin: 0;
   color: #1f6d3d;
@@ -766,6 +849,11 @@ body {
 
 .edit-account-form__submit:hover {
   background: var(--color-steel);
+}
+
+.edit-account-form__submit:disabled {
+  cursor: wait;
+  opacity: 0.7;
 }
 
 .edit-account-form__secondary {
