@@ -884,7 +884,7 @@ body {
 .point-entry__header,
 .point-entry__row {
   display: grid;
-  grid-template-columns: 120px minmax(220px, 1fr) minmax(230px, 0.9fr);
+  grid-template-columns: 90px 110px minmax(170px, 1fr) minmax(190px, 0.8fr) auto;
   gap: 1rem;
   align-items: center;
 }
@@ -976,6 +976,10 @@ body {
   color: #fff;
 }
 
+.point-entry__frequency label.is-disabled {
+  cursor: default;
+}
+
 .point-entry__frequency input {
   position: absolute;
   opacity: 0;
@@ -1002,6 +1006,46 @@ body {
 .point-entry__add span {
   font-size: 1.2rem;
   margin-right: 0.3rem;
+}
+
+.point-entry__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.point-entry__actions button {
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--color-ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 0.6rem 0.7rem;
+  white-space: nowrap;
+}
+
+.point-entry__actions button:hover:not(:disabled),
+.point-entry__actions button:focus-visible {
+  border-color: var(--color-steel);
+  color: var(--color-steel);
+}
+
+.point-entry__actions button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.point-entry__actions .point-entry__delete {
+  color: #b44738;
+}
+
+.point-entry__state {
+  margin: 1rem 0 0;
+  color: var(--color-slate);
+  font-size: 0.9rem;
 }
 
 @media (max-width: 700px) {
@@ -1055,6 +1099,10 @@ body {
     grid-template-columns: 1fr;
     gap: 0.85rem;
     padding: 1.25rem 0;
+  }
+
+  .point-entry__actions {
+    flex-wrap: wrap;
   }
 
   .point-entry__mobile-label {

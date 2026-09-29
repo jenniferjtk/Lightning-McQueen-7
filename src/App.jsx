@@ -93,7 +93,7 @@ export default function App() {
       ) : visiblePage === 'account' ? (
         <AccountPage user={user} onProfileUpdate={handleProfileUpdate} />
       ) : visiblePage === 'points' ? (
-        <PointManagementPage />
+        <PointManagementPage user={user} />
       ) : visiblePage === 'sponsors' ? (
         <SponsorsPage user={user} />
       ) : visiblePage === 'application' ? (

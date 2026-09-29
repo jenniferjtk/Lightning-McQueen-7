@@ -51,6 +51,42 @@ const adminDriver = (user) => ({
 
 const validEmail = (email) => typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
+const requireRuleManager = async (req, res, next) => {
+  if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
+  try {
+    const [rows] = await pool.execute('SELECT role FROM users WHERE user_id = ?', [req.session.userId]);
+    if (!rows[0]) return res.status(401).json({ message: 'Session expired.' });
+    if (!['admin', 'sponsor'].includes(rows[0].role)) {
+      return res.status(403).json({ message: 'Sponsor access is required to manage point rules.' });
+    }
+    return next();
+  } catch (error) {
+    console.error('Point rule authorization failed:', error.message);
+    return res.status(500).json({ message: 'Unable to authorize this request.' });
+  }
+};
+
+const validateSponsorRule = (body) => {
+  const sponsorId = Number(body.sponsorId);
+  const ptValue = Number(body.ptValue);
+  const description = typeof body.description === 'string' ? body.description.trim() : '';
+  const frequency = body.frequency;
+
+  if (!Number.isSafeInteger(sponsorId) || sponsorId < 1 || sponsorId > 2147483647) {
+    return { error: 'Choose a valid sponsor organization.' };
+  }
+  if (!Number.isSafeInteger(ptValue) || ptValue < -2147483648 || ptValue > 2147483647) {
+    return { error: 'Points must be a whole number.' };
+  }
+  if (!description || description.length > 45) {
+    return { error: 'Description is required and must be 45 characters or fewer.' };
+  }
+  if (!['one-time', 'recurring'].includes(frequency)) {
+    return { error: 'Frequency must be one-time or recurring.' };
+  }
+  return { sponsorId, ptValue, description, frequency };
+};
+
 const requireAdmin = async (req, res, next) => {
   if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
   try {
@@ -233,6 +269,88 @@ app.delete('/api/admin/drivers/:driverId', requireAdmin, async (req, res) => {
     }
     console.error('Driver deletion failed:', error.message);
     return res.status(500).json({ message: 'Unable to delete the driver account.' });
+  }
+});
+
+app.get('/api/sponsor-rules', async (req, res) => {
+  if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
+  try {
+    const [rows] = await pool.execute(
+      'SELECT rule_id, sponsor_id, pt_value, description, frequency FROM sponsor_rules ORDER BY sponsor_id, rule_id',
+    );
+    return res.json({ rules: rows });
+  } catch (error) {
+    console.error('Point rule list failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load point rules.' });
+  }
+});
+
+app.post('/api/sponsor-rules', requireRuleManager, async (req, res) => {
+  const rule = validateSponsorRule(req.body || {});
+  if (rule.error) return res.status(400).json({ message: rule.error });
+  try {
+    const [sponsors] = await pool.execute('SELECT sponsor_id FROM sponsors WHERE sponsor_id = ?', [rule.sponsorId]);
+    if (!sponsors[0]) return res.status(400).json({ message: 'Sponsor organization not found.' });
+    const [result] = await pool.execute(
+      'INSERT INTO sponsor_rules (sponsor_id, pt_value, description, frequency) VALUES (?, ?, ?, ?)',
+      [rule.sponsorId, rule.ptValue, rule.description, rule.frequency],
+    );
+    return res.status(201).json({
+      rule: {
+        rule_id: result.insertId,
+        sponsor_id: rule.sponsorId,
+        pt_value: rule.ptValue,
+        description: rule.description,
+        frequency: rule.frequency,
+      },
+    });
+  } catch (error) {
+    console.error('Point rule creation failed:', error.message);
+    return res.status(500).json({ message: 'Unable to create the point rule.' });
+  }
+});
+
+app.put('/api/sponsor-rules/:ruleId', requireRuleManager, async (req, res) => {
+  const ruleId = Number(req.params.ruleId);
+  const rule = validateSponsorRule(req.body || {});
+  if (!Number.isSafeInteger(ruleId) || ruleId < 1) return res.status(400).json({ message: 'Invalid point rule.' });
+  if (rule.error) return res.status(400).json({ message: rule.error });
+  try {
+    const [sponsors] = await pool.execute('SELECT sponsor_id FROM sponsors WHERE sponsor_id = ?', [rule.sponsorId]);
+    if (!sponsors[0]) return res.status(400).json({ message: 'Sponsor organization not found.' });
+    const [result] = await pool.execute(
+      'UPDATE sponsor_rules SET sponsor_id = ?, pt_value = ?, description = ?, frequency = ? WHERE rule_id = ?',
+      [rule.sponsorId, rule.ptValue, rule.description, rule.frequency, ruleId],
+    );
+    if (!result.affectedRows) {
+      const [existing] = await pool.execute('SELECT rule_id FROM sponsor_rules WHERE rule_id = ?', [ruleId]);
+      if (!existing[0]) return res.status(404).json({ message: 'Point rule not found.' });
+    }
+    return res.json({
+      rule: {
+        rule_id: ruleId,
+        sponsor_id: rule.sponsorId,
+        pt_value: rule.ptValue,
+        description: rule.description,
+        frequency: rule.frequency,
+      },
+    });
+  } catch (error) {
+    console.error('Point rule update failed:', error.message);
+    return res.status(500).json({ message: 'Unable to update the point rule.' });
+  }
+});
+
+app.delete('/api/sponsor-rules/:ruleId', requireRuleManager, async (req, res) => {
+  const ruleId = Number(req.params.ruleId);
+  if (!Number.isSafeInteger(ruleId) || ruleId < 1) return res.status(400).json({ message: 'Invalid point rule.' });
+  try {
+    const [result] = await pool.execute('DELETE FROM sponsor_rules WHERE rule_id = ?', [ruleId]);
+    if (!result.affectedRows) return res.status(404).json({ message: 'Point rule not found.' });
+    return res.status(204).end();
+  } catch (error) {
+    console.error('Point rule deletion failed:', error.message);
+    return res.status(500).json({ message: 'Unable to delete the point rule.' });
   }
 });
 
