@@ -4,10 +4,10 @@ module.exports.handler = async () => {
   try {
     const pool = getPool();
     const [rows] = await pool.query(
-      `SELECT sprint_number AS sprintNumber,
+      `SELECT sprint_num AS sprintNumber,
               DATE_FORMAT(release_date, '%m/%d/%Y') AS releaseDate
        FROM about_page
-       ORDER BY sprint_number DESC, release_date DESC
+       ORDER BY sprint_num DESC, release_date DESC
        LIMIT 1`
     );
     if (!rows.length) {

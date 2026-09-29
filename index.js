@@ -99,6 +99,25 @@ const requireAdmin = async (req, res, next) => {
   }
 };
 
+app.get('/api/about', async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT sprint_num AS sprintNumber,
+              DATE_FORMAT(release_date, '%m/%d/%Y') AS releaseDate
+       FROM about_page
+       ORDER BY sprint_num DESC, release_date DESC
+       LIMIT 1`,
+    );
+    if (!rows.length) {
+      return res.status(404).json({ message: 'No sprint release information is available.' });
+    }
+    return res.json(rows[0]);
+  } catch (error) {
+    console.error('About page lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load release details from the database.' });
+  }
+});
+
 app.get('/api/auth/me', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
 

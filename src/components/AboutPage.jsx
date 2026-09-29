@@ -7,8 +7,11 @@ export default function AboutPage() {
   useEffect(() => {
     fetch('/api/about')
       .then(async (response) => {
+        if (!response.headers.get('content-type')?.includes('application/json')) {
+          throw new Error('Release details are unavailable. The About API returned an unexpected response.');
+        }
         const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'Unable to load release details.');
+        if (!response.ok) throw new Error(data.message || data.error || 'Unable to load release details.');
         return data;
       })
       .then(setRelease)
