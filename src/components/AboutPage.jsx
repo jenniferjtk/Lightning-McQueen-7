@@ -1,13 +1,31 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 
 export default function AboutPage() {
+  const [release, setRelease] = useState(null);
+  const [loadError, setLoadError] = useState('');
+
+  useEffect(() => {
+    fetch('/api/about')
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Unable to load release details.');
+        return data;
+      })
+      .then(setRelease)
+      .catch((error) => setLoadError(error.message));
+  }, []);
+
   return (
     <main className="about-page">
       <section className="about-page__intro">
         <p className="about-page__eyebrow">Lightning McQueen</p>
         <h1>Good Driver Incentive Program</h1>
-        <p className="about-page__summary">
-          Team 07 | Sprint 02 | Released 09/22/2026
+        <p className="about-page__summary" role={loadError ? 'alert' : undefined}>
+          {loadError
+            ? loadError
+            : release
+              ? `Team 07 | Sprint ${String(release.sprintNumber).padStart(2, '0')} | Released ${release.releaseDate}`
+              : 'Loading release details...'}
         </p>
       </section>
 

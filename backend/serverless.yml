@@ -32,6 +32,9 @@ functions:
       - httpApi:
           path: /about
           method: get
+      - httpApi:
+          path: /api/about
+          method: get
   login:
     handler: handlers/login.handler
     events:
