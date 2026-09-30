@@ -18,7 +18,7 @@ export default function MyApplicationPage({ user }) {
   const loadApplications = () => {
     setLoading(true);
     setLoadError('');
-    return fetch(`/api/applications?driverUserId=${encodeURIComponent(user.id)}`)
+    return fetch('/api/applications')
       .then((response) => response.ok ? response.json() : Promise.reject(new Error('Unable to load your applications.')))
       .then(setApplications)
       .catch((error) => setLoadError(error.message))
@@ -36,11 +36,9 @@ export default function MyApplicationPage({ user }) {
     try {
       const response = await fetch(`/api/applications/${applicationId}/withdraw`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ driverUserId: user.id }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Something went wrong.');
+      if (!response.ok) throw new Error(data.message || 'Something went wrong.');
       await loadApplications();
     } catch (error) {
       setWithdrawError(error.message);

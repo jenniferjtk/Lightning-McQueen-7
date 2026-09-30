@@ -46,3 +46,14 @@ DB_USER='user name'
 DB_PASSWORD='password'
 DB_NAME='DB name'
 SESSION_SECRET='random long string'
+
+## Deploy to AWS
+
+The whole app (Express API on `/api/*`, React build on everything else) is one
+Serverless stack defined in `serverless.yml`. New endpoints go in `index.js`.
+
+```bash
+set -a && source backend/.env && set +a && npm run deploy
+```
+
+Live at https://pqo7vj4gc4.execute-api.us-east-2.amazonaws.com/

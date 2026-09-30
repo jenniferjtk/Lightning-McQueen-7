@@ -24,7 +24,7 @@ export default function SponsorApplicationsPage({ user, onPendingCountChange }) 
   const [decideError, setDecideError] = useState('');
 
   useEffect(() => {
-    fetch(`/api/applications?sponsorId=${encodeURIComponent(user.sponsorId)}`)
+    fetch('/api/applications')
       .then((response) => response.ok ? response.json() : Promise.reject(new Error('Unable to load applications.')))
       .then(setApplications)
       .catch((error) => setLoadError(error.message))
@@ -44,10 +44,10 @@ export default function SponsorApplicationsPage({ user, onPendingCountChange }) 
       const response = await fetch(`/api/applications/${applicationId}/decide`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sponsorId: user.sponsorId, decision }),
+        body: JSON.stringify({ decision }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Something went wrong.');
+      if (!response.ok) throw new Error(data.message || 'Something went wrong.');
       setApplications((current) => current.map((application) => (
         application.application_id === applicationId
           ? { ...application, status: data.status, decided_at: new Date().toISOString() }

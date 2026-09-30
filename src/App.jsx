@@ -72,7 +72,7 @@ export default function App() {
       setPendingCount(0);
       return;
     }
-    fetch(`/api/applications?sponsorId=${encodeURIComponent(user.sponsorId)}&status=pending`)
+    fetch('/api/applications?status=pending')
       .then((response) => response.ok ? response.json() : [])
       .then((rows) => setPendingCount(rows.length))
       .catch(() => setPendingCount(0));

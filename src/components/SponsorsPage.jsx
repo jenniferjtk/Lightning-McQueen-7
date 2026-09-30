@@ -22,10 +22,10 @@ export default function SponsorsPage({ user }) {
       const response = await fetch('/api/applications', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ driverUserId: user.id, sponsorId }),
+        body: JSON.stringify({ sponsorId }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Something went wrong.');
+      if (!response.ok) throw new Error(data.message || 'Something went wrong.');
       setApplyMessages((current) => ({ ...current, [sponsorId]: { type: 'success', text: 'Application submitted!' } }));
     } catch (error) {
       setApplyMessages((current) => ({ ...current, [sponsorId]: { type: 'error', text: error.message } }));

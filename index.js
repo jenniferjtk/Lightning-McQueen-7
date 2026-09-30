@@ -436,6 +436,164 @@ const driver = {
   recentPurchases: [],
 };
 
+// Loads the signed-in user onto req.currentUser and rejects anyone whose role
+// isn't listed. Application routes take the driver/sponsor identity from here,
+// never from the request body or query string.
+const requireRole = (...roles) => async (req, res, next) => {
+  if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
+  try {
+    const [rows] = await pool.execute('SELECT user_id, role, sponsor_id FROM users WHERE user_id = ?', [req.session.userId]);
+    if (!rows[0]) return res.status(401).json({ message: 'Session expired.' });
+    if (!roles.includes(rows[0].role)) return res.status(403).json({ message: 'You do not have access to this action.' });
+    if (rows[0].role === 'sponsor' && !rows[0].sponsor_id) {
+      return res.status(403).json({ message: 'Your account is not linked to a sponsor organization.' });
+    }
+    req.currentUser = rows[0];
+    return next();
+  } catch (error) {
+    console.error('Role authorization failed:', error.message);
+    return res.status(500).json({ message: 'Unable to authorize this request.' });
+  }
+};
+
+const APPLICATION_STATUSES = ['pending', 'approved', 'rejected', 'withdrawn'];
+
+app.get('/api/sponsors', async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      'SELECT sponsor_id, name, description, point_conversion_rate FROM sponsors ORDER BY name',
+    );
+    return res.json(rows);
+  } catch (error) {
+    console.error('Sponsor lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load sponsors.' });
+  }
+});
+
+// Drivers see their own applications; sponsors see their organization's,
+// joined with each applying driver's profile.
+app.get('/api/applications', requireRole('driver', 'sponsor'), async (req, res) => {
+  const { status } = req.query;
+  if (status && !APPLICATION_STATUSES.includes(status)) {
+    return res.status(400).json({ message: `Status must be one of: ${APPLICATION_STATUSES.join(', ')}.` });
+  }
+
+  try {
+    if (req.currentUser.role === 'driver') {
+      const [rows] = await pool.execute(
+        `SELECT a.application_id, a.sponsor_id, s.name AS sponsor_name, a.status, a.submitted_at
+         FROM driver_applications a
+         JOIN sponsors s ON s.sponsor_id = a.sponsor_id
+         WHERE a.driver_user_id = ?${status ? ' AND a.status = ?' : ''}
+         ORDER BY a.submitted_at DESC`,
+        status ? [req.currentUser.user_id, status] : [req.currentUser.user_id],
+      );
+      return res.json(rows);
+    }
+
+    const [rows] = await pool.execute(
+      `SELECT a.application_id, a.status, a.submitted_at, a.decided_at,
+              u.user_id AS driver_user_id, u.first_name, u.last_name, u.email
+       FROM driver_applications a
+       JOIN users u ON u.user_id = a.driver_user_id
+       WHERE a.sponsor_id = ?${status ? ' AND a.status = ?' : ''}
+       ORDER BY a.submitted_at DESC`,
+      status ? [req.currentUser.sponsor_id, status] : [req.currentUser.sponsor_id],
+    );
+    return res.json(rows);
+  } catch (error) {
+    console.error('Application lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load applications.' });
+  }
+});
+
+app.post('/api/applications', requireRole('driver'), async (req, res) => {
+  const sponsorId = Number(req.body?.sponsorId);
+  if (!Number.isSafeInteger(sponsorId) || sponsorId < 1) {
+    return res.status(400).json({ message: 'Choose a valid sponsor.' });
+  }
+
+  try {
+    const [sponsors] = await pool.execute('SELECT sponsor_id FROM sponsors WHERE sponsor_id = ?', [sponsorId]);
+    if (!sponsors[0]) return res.status(400).json({ message: 'No sponsor found for that sponsor.' });
+
+    const [existing] = await pool.execute(
+      "SELECT application_id FROM driver_applications WHERE driver_user_id = ? AND sponsor_id = ? AND status IN ('pending', 'approved')",
+      [req.currentUser.user_id, sponsorId],
+    );
+    if (existing[0]) {
+      return res.status(409).json({ message: 'You already have a pending or approved application with this sponsor.' });
+    }
+
+    const [result] = await pool.execute(
+      "INSERT INTO driver_applications (driver_user_id, sponsor_id, status) VALUES (?, ?, 'pending')",
+      [req.currentUser.user_id, sponsorId],
+    );
+    return res.status(201).json({ application_id: result.insertId, sponsor_id: sponsorId, status: 'pending' });
+  } catch (error) {
+    console.error('Application create failed:', error.message);
+    return res.status(500).json({ message: 'Unable to submit your application.' });
+  }
+});
+
+app.patch('/api/applications/:applicationId/withdraw', requireRole('driver'), async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      'SELECT status FROM driver_applications WHERE application_id = ? AND driver_user_id = ?',
+      [req.params.applicationId, req.currentUser.user_id],
+    );
+    if (!rows[0]) return res.status(404).json({ message: 'No matching application was found.' });
+    if (rows[0].status !== 'pending') {
+      return res.status(409).json({ message: `Cannot withdraw an application with status "${rows[0].status}".` });
+    }
+
+    // status = 'pending' in the WHERE guards against a decision landing
+    // between the SELECT above and this UPDATE.
+    const [result] = await pool.execute(
+      "UPDATE driver_applications SET status = 'withdrawn' WHERE application_id = ? AND status = 'pending'",
+      [req.params.applicationId],
+    );
+    if (result.affectedRows === 0) return res.status(409).json({ message: 'Application is no longer pending.' });
+    return res.json({ application_id: Number(req.params.applicationId), status: 'withdrawn' });
+  } catch (error) {
+    console.error('Application withdraw failed:', error.message);
+    return res.status(500).json({ message: 'Unable to withdraw your application.' });
+  }
+});
+
+app.patch('/api/applications/:applicationId/decide', requireRole('sponsor'), async (req, res) => {
+  const { decision } = req.body || {};
+  if (!['approved', 'rejected'].includes(decision)) {
+    return res.status(400).json({ message: 'Decision must be "approved" or "rejected".' });
+  }
+
+  try {
+    const [rows] = await pool.execute(
+      'SELECT sponsor_id, status FROM driver_applications WHERE application_id = ?',
+      [req.params.applicationId],
+    );
+    if (!rows[0]) return res.status(404).json({ message: 'No application found with that id.' });
+    if (Number(rows[0].sponsor_id) !== Number(req.currentUser.sponsor_id)) {
+      return res.status(403).json({ message: 'This application belongs to a different sponsor.' });
+    }
+    if (rows[0].status !== 'pending') {
+      return res.status(409).json({ message: `Cannot decide an application with status "${rows[0].status}".` });
+    }
+
+    // status = 'pending' in the WHERE guards against a withdraw or second
+    // decision landing between the SELECT above and this UPDATE.
+    const [result] = await pool.execute(
+      "UPDATE driver_applications SET status = ?, decided_at = NOW() WHERE application_id = ? AND status = 'pending'",
+      [decision, req.params.applicationId],
+    );
+    if (result.affectedRows === 0) return res.status(409).json({ message: 'Application is no longer pending.' });
+    return res.json({ application_id: Number(req.params.applicationId), status: decision });
+  } catch (error) {
+    console.error('Application decision failed:', error.message);
+    return res.status(500).json({ message: 'Unable to save your decision.' });
+  }
+});
+
 app.get('/api/driver', (req, res) => {
   if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
   res.json(driver);
