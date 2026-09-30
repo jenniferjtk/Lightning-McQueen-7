@@ -12,7 +12,7 @@ import AdminHomePage from './components/AdminHomePage.jsx';
 import AdminDriversPage from './components/AdminDriversPage.jsx';
 import SponsorApplicationsPage from './components/SponsorApplicationsPage.jsx';
 
-const driver = {
+const emptyDriver = {
   name: '',
   dateJoined: '',
   sponsorName: '',
@@ -28,6 +28,7 @@ export default function App() {
   const [checkingSession, setCheckingSession] = useState(true);
   const [activeTab, setActiveTab] = useState('purchases');
   const [pendingCount, setPendingCount] = useState(0);
+  const [driverData, setDriverData] = useState(null);
   const [currentPage, setCurrentPage] = useState(() => {
     const pathname = window.location.pathname;
     if (pathname === '/about') return 'about';
@@ -78,10 +79,23 @@ export default function App() {
       .catch(() => setPendingCount(0));
   }, [user]);
 
+  useEffect(() => {
+    if (!user) {
+      setDriverData(null);
+      return;
+    }
+    fetch('/api/driver', { credentials: 'include' })
+      .then((response) => response.ok ? response.json() : null)
+      .then(setDriverData)
+      .catch(() => setDriverData(null));
+  }, [user]);
+
   const handlePendingCountChange = useCallback((count) => setPendingCount(count), []);
 
   if (checkingSession) return <div className="state-screen">Checking your session...</div>;
   if (!user) return <AuthPage onAuthenticated={setUser} />;
+
+  const driver = { ...emptyDriver, ...driverData };
 
   const handleProfileUpdate = (updatedUser) => {
     setUser(updatedUser);

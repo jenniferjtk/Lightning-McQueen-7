@@ -424,18 +424,6 @@ app.delete('/api/sponsor-rules/:ruleId', requireRuleManager, async (req, res) =>
   }
 });
 
-// Placeholder shape — replace with a real database query keyed off the
-// authenticated driver's ID. Field names must stay the same since the
-// frontend reads this exact shape.
-const driver = {
-  id: '',
-  name: '',
-  dateJoined: '',
-  sponsorName: '',
-  points: 0,
-  recentPurchases: [],
-};
-
 // Loads the signed-in user onto req.currentUser and rejects anyone whose role
 // isn't listed. Application routes take the driver/sponsor identity from here,
 // never from the request body or query string.
@@ -594,9 +582,40 @@ app.patch('/api/applications/:applicationId/decide', requireRole('sponsor'), asy
   }
 });
 
-app.get('/api/driver', (req, res) => {
+// Dashboard data for the signed-in user. The sponsor is whichever sponsor(s)
+// approved this driver's application. Points and purchases aren't stored yet,
+// so they stay empty until those tables exist.
+app.get('/api/driver', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
-  res.json(driver);
+
+  try {
+    const [users] = await pool.execute(
+      'SELECT user_id, first_name, last_name, created_at FROM users WHERE user_id = ?',
+      [req.session.userId],
+    );
+    if (!users[0]) return res.status(401).json({ message: 'Session expired.' });
+
+    const [sponsors] = await pool.execute(
+      `SELECT s.name
+       FROM driver_applications a
+       JOIN sponsors s ON s.sponsor_id = a.sponsor_id
+       WHERE a.driver_user_id = ? AND a.status = 'approved'
+       ORDER BY a.decided_at DESC`,
+      [req.session.userId],
+    );
+
+    return res.json({
+      id: users[0].user_id,
+      name: `${users[0].first_name} ${users[0].last_name}`.trim(),
+      dateJoined: users[0].created_at,
+      sponsorName: sponsors.map((sponsor) => sponsor.name).join(', '),
+      points: 0,
+      recentPurchases: [],
+    });
+  } catch (error) {
+    console.error('Driver dashboard lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load your dashboard.' });
+  }
 });
 
 if (!isLambda) {
