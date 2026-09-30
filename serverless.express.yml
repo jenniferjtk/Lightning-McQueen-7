@@ -1,0 +1,48 @@
+# Express app (index.js) on Lambda, attached to the existing HTTP API created by
+# backend/serverless.yml. Deploy from the repo root:
+#   npx serverless deploy --config serverless.express.yml
+# DB_* and SESSION_SECRET must be in the shell environment (see backend/.env).
+org: jennagracejohnson3
+app: lightning-mcqueen
+service: lightning-mcqueen-express
+
+provider:
+  name: aws
+  runtime: nodejs22.x
+  region: us-east-2
+  deploymentBucket:
+    name: team07-lightning-mcqueen-deploy
+  httpApi:
+    id: 1fpzbaz91l
+  environment:
+    DB_HOST: ${env:DB_HOST}
+    DB_USER: ${env:DB_USER}
+    DB_PASSWORD: ${env:DB_PASSWORD}
+    DB_NAME: ${env:DB_NAME}
+    SESSION_SECRET: ${env:SESSION_SECRET}
+
+package:
+  patterns:
+    - '!**'
+    - index.js
+    - lambda.js
+    - package.json
+    - node_modules/**
+    - '!node_modules/.bin/**'
+    - '!node_modules/vite/**'
+    - '!node_modules/@vitejs/**'
+    - '!node_modules/esbuild/**'
+    - '!node_modules/@esbuild/**'
+    - '!node_modules/rollup/**'
+    - '!node_modules/@rollup/**'
+    - '!node_modules/@babel/**'
+    - '!node_modules/react/**'
+    - '!node_modules/react-dom/**'
+
+functions:
+  express:
+    handler: lambda.handler
+    events:
+      - httpApi:
+          path: /express/{proxy+}
+          method: '*'

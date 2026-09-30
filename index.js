@@ -3,12 +3,18 @@ import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 import session from 'express-session';
+import MySQLStoreFactory from 'express-mysql-session';
 import mysql from 'mysql2/promise';
 
 dotenv.config();
 
 const app = express();
+// Set by the Lambda runtime; absent when running locally with `npm run server`.
+const isLambda = Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME);
 const PORT = process.env.PORT || 4000;
+// API Gateway terminates TLS, so trust its X-Forwarded-Proto; without this
+// express-session refuses to send the Secure cookie.
+if (isLambda) app.set('trust proxy', 1);
 const pool = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
   port: Number(process.env.DB_PORT || 3306),
@@ -21,14 +27,30 @@ const pool = mysql.createPool({
 
 app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
 app.use(express.json());
+// Lambda instances share no memory, so sessions must live in MySQL there
+// (table from backend/db/migrations/004_sessions_table.sql). Local runs keep
+// the default in-memory store.
+const MySQLStore = MySQLStoreFactory(session);
+const sessionStore = isLambda
+  ? new MySQLStore({
+    host: process.env.DB_HOST,
+    port: Number(process.env.DB_PORT || 3306),
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    createDatabaseTable: false,
+  })
+  : undefined;
+
 app.use(session({
+  store: sessionStore,
   secret: process.env.SESSION_SECRET || 'development-session-secret',
   resave: false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    secure: isLambda || process.env.NODE_ENV === 'production',
     maxAge: 1000 * 60 * 60 * 8,
   },
 }));
@@ -39,6 +61,7 @@ const publicUser = (user) => ({
   role: user.role,
   firstName: user.first_name,
   lastName: user.last_name,
+  sponsorId: user.sponsor_id ?? null,
 });
 
 const adminDriver = (user) => ({
@@ -123,7 +146,7 @@ app.get('/api/auth/me', async (req, res) => {
 
   try {
     const [rows] = await pool.execute(
-      'SELECT user_id, email, role, first_name, last_name FROM users WHERE user_id = ?',
+      'SELECT user_id, email, role, first_name, last_name, sponsor_id FROM users WHERE user_id = ?',
       [req.session.userId],
     );
     if (!rows[0]) {
@@ -161,6 +184,7 @@ app.post('/api/auth/register', async (req, res) => {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         role: 'driver',
+        sponsorId: null,
       },
     });
   } catch (error) {
@@ -390,6 +414,10 @@ app.get('/api/driver', (req, res) => {
   res.json(driver);
 });
 
-app.listen(PORT, () => {
-  console.log(`Driver dashboard API running on http://localhost:${PORT}`);
-});
+if (!isLambda) {
+  app.listen(PORT, () => {
+    console.log(`Driver dashboard API running on http://localhost:${PORT}`);
+  });
+}
+
+export { app };
