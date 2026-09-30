@@ -212,6 +212,33 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
+app.post('/api/auth/change-password', async (req, res) => {
+  if (!req.session.userId) return res.status(401).json({ message: 'Please sign in again to change your password.' });
+
+  const { currentPassword, newPassword } = req.body || {};
+  if (typeof currentPassword !== 'string' || typeof newPassword !== 'string') {
+    return res.status(400).json({ message: 'Enter your current password and a new password.' });
+  }
+  if (newPassword.length < 8) {
+    return res.status(400).json({ message: 'New password must be at least 8 characters.' });
+  }
+
+  try {
+    const [rows] = await pool.execute('SELECT password_hash FROM users WHERE user_id = ?', [req.session.userId]);
+    if (!rows[0]) return res.status(401).json({ message: 'Your account could not be found. Please sign in again.' });
+    if (!(await bcrypt.compare(currentPassword, rows[0].password_hash))) {
+      return res.status(400).json({ message: 'Current password is incorrect.' });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await pool.execute('UPDATE users SET password_hash = ? WHERE user_id = ?', [passwordHash, req.session.userId]);
+    return res.json({ message: 'Password updated successfully.' });
+  } catch (error) {
+    console.error('Password change failed:', error.message);
+    return res.status(500).json({ message: 'Unable to update your password right now.' });
+  }
+});
+
 app.post('/api/auth/logout', (req, res) => {
   req.session.destroy(() => res.status(204).end());
 });
