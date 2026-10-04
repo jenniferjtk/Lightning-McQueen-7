@@ -618,7 +618,8 @@ app.get('/api/driver', async (req, res) => {
   }
 });
 
-if (!isLambda) {
+// Vitest imports the app and drives it with Supertest, so it must not bind a port.
+if (!isLambda && !process.env.VITEST) {
   app.listen(PORT, () => {
     console.log(`Driver dashboard API running on http://localhost:${PORT}`);
   });

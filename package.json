@@ -8,7 +8,9 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "server": "node index.js",
-    "deploy": "vite build && npx serverless deploy"
+    "deploy": "vite build && npx serverless deploy",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -23,7 +25,13 @@
     "serverless-http": "^4.0.0"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
     "@vitejs/plugin-react": "^4.3.1",
-    "vite": "^5.4.0"
+    "jsdom": "^27.0.1",
+    "supertest": "^7.3.1",
+    "vite": "^5.4.0",
+    "vitest": "^2.1.9"
   }
 }

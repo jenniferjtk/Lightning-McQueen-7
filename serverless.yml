@@ -41,6 +41,11 @@ package:
     - '!node_modules/@babel/**'
     - '!node_modules/react/**'
     - '!node_modules/react-dom/**'
+    - '!node_modules/vitest/**'
+    - '!node_modules/@vitest/**'
+    - '!node_modules/jsdom/**'
+    - '!node_modules/@testing-library/**'
+    - '!node_modules/supertest/**'
 
 functions:
   api:
