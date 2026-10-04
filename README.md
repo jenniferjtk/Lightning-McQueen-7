@@ -54,6 +54,18 @@ npm run dev
 Vite proxies `/api` requests to the API on port 4000. Locally, sessions are kept
 in memory, so restarting the API logs everyone out.
 
+## Run the tests
+
+```bash
+npm test
+```
+
+API tests (`tests/api/`) call the Express routes with Supertest against a mocked
+database, so no `.env` or MySQL is needed. Frontend tests (`tests/frontend/`)
+render React components with React Testing Library. `npm run test:watch` reruns
+them on save. GitHub Actions runs the suite and the build on every push to
+`main` and every pull request (`.github/workflows/test.yml`).
+
 ## Database
 
 Run the files in `backend/db/migrations/` against the database, in order:
