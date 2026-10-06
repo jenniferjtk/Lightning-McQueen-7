@@ -734,6 +734,56 @@ app.patch('/api/applications/:applicationId/decide', requireRole('sponsor'), asy
   }
 });
 
+// Point history charts for the signed-in driver. Each point_audit_log row
+// records one rule being applied to a driver; the rule's pt_value is the
+// change (negative = points lost) and its description is the reason. The
+// driver always comes from the session, never from the query string.
+const pointTotalsByReason = (sign) => async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT r.description AS reason, SUM(r.pt_value) AS total
+       FROM point_audit_log l
+       JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+       WHERE l.affected_user_id = ? AND r.pt_value ${sign === 'gains' ? '> 0' : '< 0'}
+       GROUP BY r.description`,
+      [req.currentUser.user_id],
+    );
+    // Losses are charted as positive sizes, largest first in both cases.
+    const totals = rows
+      .map((row) => ({ reason: row.reason || 'Unspecified', total: Math.abs(Number(row.total)) }))
+      .sort((a, b) => b.total - a.total);
+    return res.json(totals);
+  } catch (error) {
+    console.error(`Point ${sign} lookup failed:`, error.message);
+    return res.status(500).json({ message: 'Unable to load your point history.' });
+  }
+};
+
+app.get('/api/points/gains', requireRole('driver'), pointTotalsByReason('gains'));
+app.get('/api/points/losses', requireRole('driver'), pointTotalsByReason('losses'));
+
+app.get('/api/points/trend', requireRole('driver'), async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT DATE_FORMAT(l.timestamp, '%Y-%m-%d') AS date, SUM(r.pt_value) AS change_amount
+       FROM point_audit_log l
+       JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+       WHERE l.affected_user_id = ?
+       GROUP BY date
+       ORDER BY date`,
+      [req.currentUser.user_id],
+    );
+    let runningTotal = 0;
+    return res.json(rows.map((row) => {
+      runningTotal += Number(row.change_amount);
+      return { date: row.date, cumulative_total: runningTotal };
+    }));
+  } catch (error) {
+    console.error('Point trend lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load your point history.' });
+  }
+});
+
 // Dashboard data for the signed-in user. The sponsor is whichever sponsor(s)
 // approved this driver's application. Points and purchases aren't stored yet,
 // so they stay empty until those tables exist.

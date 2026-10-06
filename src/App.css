@@ -259,6 +259,22 @@ body {
   color: #b44738;
 }
 
+.dashboard__charts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
+}
+
+.dashboard__charts-wide {
+  grid-column: 1 / -1;
+}
+
+.point-chart-card__message {
+  margin: 0;
+  color: var(--color-slate);
+  font-size: 0.9rem;
+}
+
 .dashboard__panel {
   display: flex;
   flex-direction: column;
@@ -1141,6 +1157,8 @@ body {
 }
 
 @media (max-width: 700px) {
+  .dashboard__charts { grid-template-columns: 1fr; }
+
   .navbar {
     align-items: flex-start;
     flex-wrap: wrap;
