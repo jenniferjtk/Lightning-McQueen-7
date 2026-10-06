@@ -29,6 +29,7 @@ export const PASSWORD_HASH = bcrypt.hashSync(PASSWORD, 4);
 export const users = {
   driver: { user_id: 1, email: 'driver@test.com', role: 'driver', first_name: 'Dana', last_name: 'Driver', sponsor_id: null, password_hash: PASSWORD_HASH },
   sponsor: { user_id: 2, email: 'sponsor@test.com', role: 'sponsor', first_name: 'Sam', last_name: 'Sponsor', sponsor_id: 10, password_hash: PASSWORD_HASH },
+  otherDriver: { user_id: 4, email: 'other@test.com', role: 'driver', first_name: 'Otto', last_name: 'Other', sponsor_id: null, password_hash: PASSWORD_HASH },
   admin: { user_id: 3, email: 'admin@test.com', role: 'admin', first_name: 'Ada', last_name: 'Admin', sponsor_id: null, password_hash: PASSWORD_HASH },
 };
 

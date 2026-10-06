@@ -11,6 +11,7 @@ import MyApplicationPage from './components/MyApplicationPage.jsx';
 import AdminHomePage from './components/AdminHomePage.jsx';
 import AdminDriversPage from './components/AdminDriversPage.jsx';
 import SponsorApplicationsPage from './components/SponsorApplicationsPage.jsx';
+import { PointsGainedChart, PointsLostChart, PointsTrendChart } from './components/PointCharts.jsx';
 
 const emptyDriver = {
   name: '',
@@ -199,6 +200,16 @@ export default function App() {
               </section>
             </div>
           </div>
+
+          {user.role === 'driver' && (
+            <section className="dashboard__charts" aria-label="Point history">
+              <PointsGainedChart />
+              <PointsLostChart />
+              <div className="dashboard__charts-wide">
+                <PointsTrendChart />
+              </div>
+            </section>
+          )}
 
           <section className="dashboard__panel">
             <div className="dashboard__tabs" aria-label="Dashboard sections">
