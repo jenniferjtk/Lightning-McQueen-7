@@ -395,14 +395,23 @@ app.put('/api/admin/sponsors/:sponsorId', requireAdmin, async (req, res) => {
     return res.status(400).json({ message: 'A first name, last name, and valid email are required.' });
   }
   try {
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedFirstName = firstName.trim();
+    const normalizedLastName = lastName.trim();
     const [result] = await pool.execute(
       `UPDATE users SET email = ?, first_name = ?, last_name = ?
        WHERE user_id = ? AND role = 'sponsor'`,
-      [email.trim().toLowerCase(), firstName.trim(), lastName.trim(), sponsorId],
+      [normalizedEmail, normalizedFirstName, normalizedLastName, sponsorId],
     );
     if (!result.affectedRows) return res.status(404).json({ message: 'Sponsor account not found.' });
-    const [rows] = await pool.execute('SELECT user_id, email, first_name, last_name, created_at FROM users WHERE user_id = ?', [sponsorId]);
-    return res.json({ sponsor: adminDriver(rows[0]) });
+    return res.json({
+      sponsor: {
+        id: sponsorId,
+        email: normalizedEmail,
+        firstName: normalizedFirstName,
+        lastName: normalizedLastName,
+      },
+    });
   } catch (error) {
     if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ message: 'An account with that email already exists.' });
     console.error('Sponsor update failed:', error.message);
@@ -438,9 +447,14 @@ app.put('/api/admin/sponsors/:sponsorId/password', requireAdmin, async (req, res
 
 app.delete('/api/admin/sponsors/:sponsorId', requireAdmin, async (req, res) => {
   const sponsorId = Number(req.params.sponsorId);
-  if (!Number.isSafeInteger(sponsorId) || sponsorId < 1) return res.status(400).json({ message: 'Invalid sponsor account.' });
+  if (!Number.isSafeInteger(sponsorId) || sponsorId < 1) {
+    return res.status(400).json({ message: 'Invalid sponsor account.' });
+  }
   try {
-    const [result] = await pool.execute("DELETE FROM users WHERE user_id = ? AND role = 'sponsor'", [sponsorId]);
+    const [result] = await pool.execute(
+      "DELETE FROM users WHERE user_id = ? AND role = 'sponsor'",
+      [sponsorId],
+    );
     if (!result.affectedRows) return res.status(404).json({ message: 'Sponsor account not found.' });
     return res.status(204).end();
   } catch (error) {
@@ -449,6 +463,34 @@ app.delete('/api/admin/sponsors/:sponsorId', requireAdmin, async (req, res) => {
     }
     console.error('Sponsor deletion failed:', error.message);
     return res.status(500).json({ message: 'Unable to delete the sponsor account.' });
+  }
+});
+
+app.get('/api/sponsor/drivers', async (req, res) => {
+  if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
+  try {
+    const [sponsorRows] = await pool.execute(
+      "SELECT role, sponsor_id FROM users WHERE user_id = ?",
+      [req.session.userId],
+    );
+    const sponsorUser = sponsorRows[0];
+    if (!sponsorUser) return res.status(401).json({ message: 'Session expired.' });
+    if (sponsorUser.role !== 'sponsor') return res.status(403).json({ message: 'Sponsor access is required.' });
+    if (!sponsorUser.sponsor_id) return res.json({ sponsorLinked: false, drivers: [] });
+
+    const [drivers] = await pool.execute(
+      `SELECT u.user_id AS id, u.first_name AS firstName, u.last_name AS lastName,
+              u.email, u.created_at AS createdAt
+       FROM driver_applications a
+       JOIN users u ON u.user_id = a.driver_user_id
+       WHERE a.sponsor_id = ? AND a.status = 'approved' AND u.role = 'driver'
+       ORDER BY u.last_name, u.first_name, u.user_id`,
+      [sponsorUser.sponsor_id],
+    );
+    return res.json({ sponsorLinked: true, drivers });
+  } catch (error) {
+    console.error('Sponsor driver list failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load sponsor drivers.' });
   }
 });
 

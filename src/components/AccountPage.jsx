@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 
 export default function AccountPage({ user, onProfileUpdate }) {
+  const isDriver = user?.role === 'driver';
+  const isSponsor = user?.role === 'sponsor';
   const [form, setForm] = useState({
     firstName: user?.firstName || '',
     lastName: user?.lastName || '',
@@ -19,6 +21,10 @@ export default function AccountPage({ user, onProfileUpdate }) {
   const [passwordMessage, setPasswordMessage] = useState('');
   const [passwordError, setPasswordError] = useState(false);
   const [passwordSaving, setPasswordSaving] = useState(false);
+  const [sponsorDrivers, setSponsorDrivers] = useState([]);
+  const [sponsorDriversLoading, setSponsorDriversLoading] = useState(false);
+  const [sponsorDriversError, setSponsorDriversError] = useState('');
+  const [sponsorLinked, setSponsorLinked] = useState(true);
 
   useEffect(() => {
     setForm({
@@ -35,6 +41,29 @@ export default function AccountPage({ user, onProfileUpdate }) {
     });
     setSaved(false);
   }, [user]);
+
+  useEffect(() => {
+    if (!isSponsor) return undefined;
+    let cancelled = false;
+    setSponsorDriversLoading(true);
+    setSponsorDriversError('');
+    fetch('/api/sponsor/drivers', { credentials: 'include' })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Unable to load drivers.');
+        if (!cancelled) {
+          setSponsorDrivers(data.drivers || []);
+          setSponsorLinked(data.sponsorLinked);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) setSponsorDriversError(error.message);
+      })
+      .finally(() => {
+        if (!cancelled) setSponsorDriversLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [isSponsor]);
 
   const updateField = (event) => {
     const { name, value } = event.target;
@@ -77,7 +106,7 @@ export default function AccountPage({ user, onProfileUpdate }) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Unable to update your password.');
       setPasswordError(false);
-      setPasswordMessage(data.message || 'Password updated successfully.');
+      setPasswordMessage('Your password has been changed successfully.');
       setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
     } catch (error) {
       setPasswordError(true);
@@ -93,13 +122,13 @@ export default function AccountPage({ user, onProfileUpdate }) {
         <div className="account-card__header">
           <div>
             <p className="account-card__eyebrow">Edit account</p>
-            <h1>{form.firstName || 'Driver'} {form.lastName || ''}</h1>
+            <h1>{form.firstName || (isDriver ? 'Driver' : 'Account')} {form.lastName || ''}</h1>
           </div>
           <span className="account-card__badge">Active</span>
         </div>
 
         <div className="edit-account-form">
-          <div className="account-tabs" role="tablist" aria-label="Account details">
+          {(isDriver || isSponsor) && <div className="account-tabs" role="tablist" aria-label="Account details">
             <button
               id="account-tab"
               type="button"
@@ -111,6 +140,18 @@ export default function AccountPage({ user, onProfileUpdate }) {
             >
               Account information
             </button>
+            {isSponsor && <button
+              id="sponsor-drivers-tab"
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'drivers'}
+              aria-controls="sponsor-drivers-panel"
+              className={activeTab === 'drivers' ? 'account-tabs__tab account-tabs__tab--active' : 'account-tabs__tab'}
+              onClick={() => setActiveTab('drivers')}
+            >
+              Drivers
+            </button>}
+            {isDriver && <>
             <button
               id="shipping-tab"
               type="button"
@@ -133,13 +174,14 @@ export default function AccountPage({ user, onProfileUpdate }) {
             >
               Points
             </button>
-          </div>
+            </>}
+          </div>}
 
           <div
             id="account-panel"
-            role="tabpanel"
-            aria-labelledby="account-tab"
-            hidden={activeTab !== 'account'}
+            role={isDriver || isSponsor ? 'tabpanel' : undefined}
+            aria-labelledby={isDriver || isSponsor ? 'account-tab' : undefined}
+            hidden={(isDriver || isSponsor) && activeTab !== 'account'}
             className="edit-account-form__group"
           >
             <h2>Account information</h2>
@@ -164,10 +206,10 @@ export default function AccountPage({ user, onProfileUpdate }) {
               <input name="phone" value={form.phone} onChange={updateField} placeholder="(555) 123-4567" />
             </label>
 
-            <label>
+            {isDriver && <label>
               Sponsor
               <input name="sponsorName" value={form.sponsorName} onChange={updateField} placeholder="Sponsor name" />
-            </label>
+            </label>}
 
             <form className="password-change" onSubmit={changePassword}>
               <h3>Change password</h3>
@@ -209,7 +251,7 @@ export default function AccountPage({ user, onProfileUpdate }) {
                 </label>
               </div>
               {passwordMessage && (
-                <p className={passwordError ? 'password-change__message password-change__message--error' : 'password-change__message'} role={passwordError ? 'alert' : 'status'}>
+                <p className={passwordError ? 'password-change__message password-change__message--error' : 'password-change__message password-change__message--success'} role={passwordError ? 'alert' : 'status'}>
                   {passwordMessage}
                 </p>
               )}
@@ -219,7 +261,7 @@ export default function AccountPage({ user, onProfileUpdate }) {
             </form>
           </div>
 
-          <div
+          {isDriver && <div
             id="shipping-panel"
             role="tabpanel"
             aria-labelledby="shipping-tab"
@@ -253,9 +295,9 @@ export default function AccountPage({ user, onProfileUpdate }) {
                 <input name="country" value={form.country} onChange={updateField} placeholder="United States" />
               </label>
             </div>
-          </div>
+          </div>}
 
-          <section
+          {isDriver && <section
             id="points-panel"
             role="tabpanel"
             aria-labelledby="points-tab"
@@ -265,11 +307,47 @@ export default function AccountPage({ user, onProfileUpdate }) {
             <h2>Points balance</h2>
             <p className="account-points__value" aria-label="Points balance unavailable">— <span>pts</span></p>
             <p className="account-points__message">Your points balance is not available yet.</p>
-          </section>
+          </section>}
 
-          {saved && activeTab !== 'points' && <p className="edit-account-form__success">Account updated.</p>}
+          {isSponsor && <section
+            id="sponsor-drivers-panel"
+            role="tabpanel"
+            aria-labelledby="sponsor-drivers-tab"
+            hidden={activeTab !== 'drivers'}
+            className="edit-account-form__group"
+          >
+            <h2>Drivers</h2>
+            {sponsorDriversLoading ? (
+              <p>Loading drivers...</p>
+            ) : sponsorDriversError ? (
+              <p role="alert">{sponsorDriversError}</p>
+            ) : !sponsorLinked ? (
+              <p>This sponsor account is not linked to a sponsor organization yet.</p>
+            ) : sponsorDrivers.length === 0 ? (
+              <p>No approved drivers yet.</p>
+            ) : (
+              <div className="admin-driver-list__table-wrap">
+                <table className="admin-driver-table">
+                  <thead>
+                    <tr><th scope="col">Driver</th><th scope="col">Email</th><th scope="col">Joined</th></tr>
+                  </thead>
+                  <tbody>
+                    {sponsorDrivers.map((driver) => (
+                      <tr key={driver.id}>
+                        <td>{driver.firstName} {driver.lastName}</td>
+                        <td>{driver.email}</td>
+                        <td>{driver.createdAt ? new Date(driver.createdAt).toLocaleDateString() : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>}
 
-          {activeTab !== 'points' && (
+          {saved && activeTab === 'account' && <p className="edit-account-form__success">Account updated.</p>}
+
+          {activeTab === 'account' && (
             <div className="edit-account-form__actions">
               <button className="edit-account-form__submit" type="button" onClick={submit}>Save account</button>
               <a className="edit-account-form__secondary" href="/">Back to dashboard</a>

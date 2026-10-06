@@ -93,7 +93,10 @@ export default function App() {
   const handlePendingCountChange = useCallback((count) => setPendingCount(count), []);
 
   if (checkingSession) return <div className="state-screen">Checking your session...</div>;
-  if (!user) return <AuthPage onAuthenticated={setUser} />;
+  if (!user) return <AuthPage onAuthenticated={(authenticatedUser) => {
+    setUser(authenticatedUser);
+    setCurrentPage(authenticatedUser.role === 'admin' ? 'admin' : 'dashboard');
+  }} />;
 
   const driver = { ...emptyDriver, ...driverData };
 
