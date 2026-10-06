@@ -256,6 +256,19 @@ app.get('/api/admin/drivers', requireAdmin, async (req, res) => {
   }
 });
 
+app.get('/api/admin/sponsors', requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT user_id, email, first_name, last_name, created_at
+       FROM users WHERE role = 'sponsor' ORDER BY created_at DESC, user_id DESC`,
+    );
+    return res.json({ sponsors: rows.map(adminDriver) });
+  } catch (error) {
+    console.error('Sponsor user list failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load sponsor accounts.' });
+  }
+});
+
 app.post('/api/admin/users', requireAdmin, async (req, res) => {
   const { email, password, firstName, lastName, role } = req.body || {};
   if (!['driver', 'admin', 'sponsor'].includes(role)) {
@@ -372,6 +385,70 @@ app.delete('/api/admin/drivers/:driverId', requireAdmin, async (req, res) => {
     }
     console.error('Driver deletion failed:', error.message);
     return res.status(500).json({ message: 'Unable to delete the driver account.' });
+  }
+});
+
+app.put('/api/admin/sponsors/:sponsorId', requireAdmin, async (req, res) => {
+  const sponsorId = Number(req.params.sponsorId);
+  const { email, firstName, lastName } = req.body || {};
+  if (!Number.isSafeInteger(sponsorId) || sponsorId < 1 || !validEmail(email) || typeof firstName !== 'string' || !firstName.trim() || typeof lastName !== 'string' || !lastName.trim()) {
+    return res.status(400).json({ message: 'A first name, last name, and valid email are required.' });
+  }
+  try {
+    const [result] = await pool.execute(
+      `UPDATE users SET email = ?, first_name = ?, last_name = ?
+       WHERE user_id = ? AND role = 'sponsor'`,
+      [email.trim().toLowerCase(), firstName.trim(), lastName.trim(), sponsorId],
+    );
+    if (!result.affectedRows) return res.status(404).json({ message: 'Sponsor account not found.' });
+    const [rows] = await pool.execute('SELECT user_id, email, first_name, last_name, created_at FROM users WHERE user_id = ?', [sponsorId]);
+    return res.json({ sponsor: adminDriver(rows[0]) });
+  } catch (error) {
+    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ message: 'An account with that email already exists.' });
+    console.error('Sponsor update failed:', error.message);
+    return res.status(500).json({ message: 'Unable to update the sponsor account.' });
+  }
+});
+
+app.put('/api/admin/sponsors/:sponsorId/password', requireAdmin, async (req, res) => {
+  const sponsorId = Number(req.params.sponsorId);
+  const { password } = req.body || {};
+  if (!Number.isSafeInteger(sponsorId) || sponsorId < 1) {
+    return res.status(400).json({ message: 'Invalid sponsor account.' });
+  }
+  if (typeof password !== 'string' || password.length < 8) {
+    return res.status(400).json({ message: 'Password must be at least 8 characters.' });
+  }
+  if (Buffer.byteLength(password, 'utf8') > 72) {
+    return res.status(400).json({ message: 'Password must be 72 bytes or fewer.' });
+  }
+  try {
+    const passwordHash = await bcrypt.hash(password, 12);
+    const [result] = await pool.execute(
+      "UPDATE users SET password_hash = ? WHERE user_id = ? AND role = 'sponsor'",
+      [passwordHash, sponsorId],
+    );
+    if (!result.affectedRows) return res.status(404).json({ message: 'Sponsor account not found.' });
+    return res.json({ message: 'Sponsor password reset.' });
+  } catch (error) {
+    console.error('Sponsor password reset failed:', error.message);
+    return res.status(500).json({ message: 'Unable to reset the sponsor password.' });
+  }
+});
+
+app.delete('/api/admin/sponsors/:sponsorId', requireAdmin, async (req, res) => {
+  const sponsorId = Number(req.params.sponsorId);
+  if (!Number.isSafeInteger(sponsorId) || sponsorId < 1) return res.status(400).json({ message: 'Invalid sponsor account.' });
+  try {
+    const [result] = await pool.execute("DELETE FROM users WHERE user_id = ? AND role = 'sponsor'", [sponsorId]);
+    if (!result.affectedRows) return res.status(404).json({ message: 'Sponsor account not found.' });
+    return res.status(204).end();
+  } catch (error) {
+    if (error.code === 'ER_ROW_IS_REFERENCED_2') {
+      return res.status(409).json({ message: 'This sponsor has related records and cannot be deleted.' });
+    }
+    console.error('Sponsor deletion failed:', error.message);
+    return res.status(500).json({ message: 'Unable to delete the sponsor account.' });
   }
 });
 
