@@ -812,9 +812,13 @@ body {
 
 .password-change__message {
   margin: 0;
-  color: #1f6d3d;
+  color: var(--color-slate);
   font-size: 0.86rem;
   font-weight: 600;
+}
+
+.password-change__message--success {
+  color: #1f6d3d;
 }
 
 .password-change__message--error {

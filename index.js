@@ -318,6 +318,34 @@ app.delete('/api/admin/drivers/:driverId', requireAdmin, async (req, res) => {
   }
 });
 
+app.get('/api/sponsor/drivers', async (req, res) => {
+  if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
+  try {
+    const [sponsorRows] = await pool.execute(
+      "SELECT role, sponsor_id FROM users WHERE user_id = ?",
+      [req.session.userId],
+    );
+    const sponsorUser = sponsorRows[0];
+    if (!sponsorUser) return res.status(401).json({ message: 'Session expired.' });
+    if (sponsorUser.role !== 'sponsor') return res.status(403).json({ message: 'Sponsor access is required.' });
+    if (!sponsorUser.sponsor_id) return res.json({ sponsorLinked: false, drivers: [] });
+
+    const [drivers] = await pool.execute(
+      `SELECT u.user_id AS id, u.first_name AS firstName, u.last_name AS lastName,
+              u.email, u.created_at AS createdAt
+       FROM driver_applications a
+       JOIN users u ON u.user_id = a.driver_user_id
+       WHERE a.sponsor_id = ? AND a.status = 'approved' AND u.role = 'driver'
+       ORDER BY u.last_name, u.first_name, u.user_id`,
+      [sponsorUser.sponsor_id],
+    );
+    return res.json({ sponsorLinked: true, drivers });
+  } catch (error) {
+    console.error('Sponsor driver list failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load sponsor drivers.' });
+  }
+});
+
 app.get('/api/sponsor-rules', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
   try {

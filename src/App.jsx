@@ -62,7 +62,10 @@ export default function App() {
   }, [currentPage]);
 
   if (checkingSession) return <div className="state-screen">Checking your session...</div>;
-  if (!user) return <AuthPage onAuthenticated={setUser} />;
+  if (!user) return <AuthPage onAuthenticated={(authenticatedUser) => {
+    setUser(authenticatedUser);
+    setCurrentPage(authenticatedUser.role === 'admin' ? 'admin' : 'dashboard');
+  }} />;
 
   const handleProfileUpdate = (updatedUser) => {
     setUser(updatedUser);
