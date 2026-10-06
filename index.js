@@ -256,6 +256,39 @@ app.get('/api/admin/drivers', requireAdmin, async (req, res) => {
   }
 });
 
+app.post('/api/admin/users', requireAdmin, async (req, res) => {
+  const { email, password, firstName, lastName, role } = req.body || {};
+  if (!['driver', 'admin', 'sponsor'].includes(role)) {
+    return res.status(400).json({ message: 'Choose a driver, admin, or sponsor role.' });
+  }
+  if (!validEmail(email) || typeof password !== 'string' || !password ||
+      typeof firstName !== 'string' || !firstName.trim() ||
+      typeof lastName !== 'string' || !lastName.trim()) {
+    return res.status(400).json({ message: 'A first name, last name, valid email, and password are required.' });
+  }
+  if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters.' });
+  if (Buffer.byteLength(password, 'utf8') > 72) {
+    return res.status(400).json({ message: 'Password must be 72 bytes or fewer.' });
+  }
+  try {
+    const passwordHash = await bcrypt.hash(password, 12);
+    const [result] = await pool.execute(
+      `INSERT INTO users (email, password_hash, role, first_name, last_name, created_at)
+       VALUES (?, ?, ?, ?, ?, NOW())`,
+      [email.trim().toLowerCase(), passwordHash, role, firstName.trim(), lastName.trim()],
+    );
+    const [rows] = await pool.execute(
+      'SELECT user_id, email, role, first_name, last_name, created_at FROM users WHERE user_id = ?',
+      [result.insertId],
+    );
+    return res.status(201).json({ user: { ...adminDriver(rows[0]), role: rows[0].role } });
+  } catch (error) {
+    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ message: 'An account with that email already exists.' });
+    console.error('User creation failed:', error.message);
+    return res.status(500).json({ message: 'Unable to create the user account.' });
+  }
+});
+
 app.post('/api/admin/drivers', requireAdmin, async (req, res) => {
   const { email, password, firstName, lastName } = req.body;
   if (!validEmail(email) || !password || !firstName?.trim() || !lastName?.trim()) {

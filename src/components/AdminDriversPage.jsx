@@ -45,23 +45,24 @@ export default function AdminDriversPage() {
     setNewDriver((current) => ({ ...current, [name]: value }));
   };
 
-  const createDriver = async (event) => {
+  const createUser = async (event) => {
     event.preventDefault();
+    const role = event.nativeEvent.submitter?.value || 'driver';
     setSaving(true);
     setError('');
     setNotice('');
     try {
-      const response = await fetch('/api/admin/drivers', {
+      const response = await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(newDriver),
+        body: JSON.stringify({ ...newDriver, role }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.message || 'Unable to create the driver.');
-      setDrivers((current) => [data.driver, ...current]);
+      if (!response.ok) throw new Error(data.message || 'Unable to create the user account.');
+      if (data.user.role === 'driver') setDrivers((current) => [data.user, ...current]);
       setNewDriver(EMPTY_DRIVER);
-      setNotice('Driver account created.');
+      setNotice(`${role[0].toUpperCase()}${role.slice(1)} account created.`);
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -159,7 +160,7 @@ export default function AdminDriversPage() {
         <div>
           <p className="admin-home-page__eyebrow">Administration</p>
           <h1>Driver accounts</h1>
-          <p>Create and maintain driver accounts. Administrative users are not shown here.</p>
+          <p>Create driver, admin, and sponsor accounts. The list below shows only drivers.</p>
         </div>
         <p className="admin-drivers-page__count">{drivers.length} driver{drivers.length === 1 ? '' : 's'}</p>
       </section>
@@ -168,13 +169,15 @@ export default function AdminDriversPage() {
       {notice && <p className="admin-drivers-page__message admin-drivers-page__message--success" role="status">{notice}</p>}
 
       <section className="admin-driver-create card">
-        <h2 className="card__title">Create driver account</h2>
-        <form className="admin-driver-form" onSubmit={createDriver}>
+        <h2 className="card__title">Create New User Account</h2>
+        <form className="admin-driver-form" onSubmit={createUser}>
           <label>First name<input name="firstName" value={newDriver.firstName} onChange={updateNewDriver} required /></label>
           <label>Last name<input name="lastName" value={newDriver.lastName} onChange={updateNewDriver} required /></label>
           <label>Email address<input type="email" name="email" value={newDriver.email} onChange={updateNewDriver} required /></label>
           <label>Temporary password<input type="password" name="password" value={newDriver.password} onChange={updateNewDriver} minLength="8" autoComplete="new-password" required /></label>
-          <button type="submit" disabled={saving}>{saving ? 'Saving...' : 'Create driver'}</button>
+          <button type="submit" value="driver" disabled={saving}>{saving ? 'Saving...' : 'Create Driver User'}</button>
+          <button type="submit" value="admin" disabled={saving}>{saving ? 'Saving...' : 'Create Admin User'}</button>
+          <button type="submit" value="sponsor" disabled={saving}>{saving ? 'Saving...' : 'Create Sponsor User'}</button>
         </form>
       </section>
 
