@@ -57,7 +57,7 @@ export default function SponsorsPage({ user }) {
                 <h2 className="card__title">{sponsor.name}</h2>
                 {sponsor.description && <p className="sponsor-card__description">{sponsor.description}</p>}
                 <p className="sponsor-card__rate">
-                  {Number(sponsor.point_conversion_rate).toFixed(2)} points per dollar
+                  {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 4 }).format(Number(sponsor.point_conversion_rate))} per point
                 </p>
                 <button
                   type="button"

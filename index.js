@@ -99,6 +99,32 @@ const requireAdmin = async (req, res, next) => {
   }
 };
 
+const requireLinkedSponsor = async (req, res, next) => {
+  if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
+  try {
+    const [rows] = await pool.execute(
+      `SELECT s.sponsor_id, s.name
+       FROM users u
+       JOIN sponsors s ON s.sponsor_user_id = u.user_id
+       WHERE u.user_id = ? AND u.role = 'sponsor'`,
+      [req.session.userId],
+    );
+    if (!rows[0]) return res.status(403).json({ message: 'A linked sponsor organization is required.' });
+    req.sponsor = rows[0];
+    return next();
+  } catch (error) {
+    console.error('Sponsor authorization failed:', error.message);
+    return res.status(500).json({ message: 'Unable to authorize this request.' });
+  }
+};
+
+const parsePointConversionRate = (value) => {
+  const text = String(value ?? '').trim();
+  if (!/^\d{1,6}(?:\.\d{1,4})?$/.test(text)) return null;
+  const rate = Number(text);
+  return Number.isFinite(rate) && rate >= 0.0001 && rate <= 999999.9999 ? rate : null;
+};
+
 app.get('/api/about', async (req, res) => {
   try {
     const [rows] = await pool.execute(
@@ -202,6 +228,109 @@ app.get('/api/admin/drivers', requireAdmin, async (req, res) => {
   } catch (error) {
     console.error('Driver list failed:', error.message);
     return res.status(500).json({ message: 'Unable to load driver accounts.' });
+  }
+});
+
+app.get('/api/admin/sponsor-links', requireAdmin, async (req, res) => {
+  try {
+    const [sponsors] = await pool.execute(
+      `SELECT s.sponsor_id, s.name, s.sponsor_user_id,
+              u.email AS sponsor_user_email
+       FROM sponsors s
+       LEFT JOIN users u ON u.user_id = s.sponsor_user_id
+       ORDER BY s.name`,
+    );
+    const [sponsorUsers] = await pool.execute(
+      `SELECT user_id, email, first_name, last_name
+       FROM users WHERE role = 'sponsor'
+       ORDER BY last_name, first_name, user_id`,
+    );
+    return res.json({ sponsors, sponsorUsers });
+  } catch (error) {
+    console.error('Sponsor account list failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load sponsor account links.' });
+  }
+});
+
+app.put('/api/admin/sponsor-links/:sponsorId', requireAdmin, async (req, res) => {
+  const sponsorId = Number(req.params.sponsorId);
+  const sponsorUserId = req.body?.sponsorUserId === null || req.body?.sponsorUserId === ''
+    ? null
+    : Number(req.body?.sponsorUserId);
+  if (!Number.isSafeInteger(sponsorId) || sponsorId < 1) {
+    return res.status(400).json({ message: 'Invalid sponsor organization.' });
+  }
+  if (sponsorUserId !== null && (!Number.isSafeInteger(sponsorUserId) || sponsorUserId < 1)) {
+    return res.status(400).json({ message: 'Choose a valid sponsor account.' });
+  }
+  try {
+    const [sponsors] = await pool.execute('SELECT sponsor_id FROM sponsors WHERE sponsor_id = ?', [sponsorId]);
+    if (!sponsors[0]) return res.status(404).json({ message: 'Sponsor organization not found.' });
+    if (sponsorUserId !== null) {
+      const [users] = await pool.execute("SELECT user_id FROM users WHERE user_id = ? AND role = 'sponsor'", [sponsorUserId]);
+      if (!users[0]) return res.status(400).json({ message: 'Choose a sponsor account.' });
+    }
+    await pool.execute('UPDATE sponsors SET sponsor_user_id = ? WHERE sponsor_id = ?', [sponsorUserId, sponsorId]);
+    return res.json({ message: 'Sponsor account link saved.' });
+  } catch (error) {
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ message: 'That sponsor account is already linked to another organization.' });
+    }
+    console.error('Sponsor account link update failed:', error.message);
+    return res.status(500).json({ message: 'Unable to save the sponsor account link.' });
+  }
+});
+
+app.get('/api/sponsor/conversion', requireLinkedSponsor, async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      'SELECT name, point_conversion_rate FROM sponsors WHERE sponsor_id = ?',
+      [req.sponsor.sponsor_id],
+    );
+    return res.json({ sponsorName: rows[0].name, pointConversionRate: rows[0].point_conversion_rate });
+  } catch (error) {
+    console.error('Sponsor conversion lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load the point value.' });
+  }
+});
+
+app.put('/api/sponsor/conversion', requireLinkedSponsor, async (req, res) => {
+  const pointConversionRate = parsePointConversionRate(req.body?.pointConversionRate);
+  if (pointConversionRate === null) {
+    return res.status(400).json({ message: 'Enter a dollar value from 0.0001 to 999999.9999 per point.' });
+  }
+  try {
+    await pool.execute(
+      'UPDATE sponsors SET point_conversion_rate = ? WHERE sponsor_id = ?',
+      [pointConversionRate, req.sponsor.sponsor_id],
+    );
+    return res.json({ sponsorName: req.sponsor.name, pointConversionRate });
+  } catch (error) {
+    console.error('Sponsor conversion update failed:', error.message);
+    return res.status(500).json({ message: 'Unable to save the point value.' });
+  }
+});
+
+app.get('/api/driver/conversion', async (req, res) => {
+  if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
+  try {
+    const [rows] = await pool.execute(
+      `SELECT s.name AS sponsor_name, s.point_conversion_rate
+       FROM users u
+       JOIN driver_applications a ON a.driver_user_id = u.user_id AND a.status = 'approved'
+       JOIN sponsors s ON s.sponsor_id = a.sponsor_id
+       WHERE u.user_id = ? AND u.role = 'driver'
+       ORDER BY COALESCE(a.decided_at, a.submitted_at) DESC, a.application_id DESC
+       LIMIT 1`,
+      [req.session.userId],
+    );
+    return res.json({
+      sponsorName: rows[0]?.sponsor_name || null,
+      pointConversionRate: rows[0]?.point_conversion_rate ?? null,
+    });
+  } catch (error) {
+    console.error('Driver conversion lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load the point value.' });
   }
 });
 
