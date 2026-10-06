@@ -1401,3 +1401,49 @@ body {
   cursor: wait;
   opacity: 0.7;
 }
+
+.navbar__badge {
+  display: inline-block;
+  min-width: 1.25rem;
+  margin-left: 0.4rem;
+  border-radius: 999px;
+  padding: 0.05rem 0.4rem;
+  background: #b23b3b;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2rem;
+  text-align: center;
+}
+
+.applications-table__actions {
+  display: flex;
+  gap: 0.4rem;
+  justify-content: flex-end;
+}
+
+.applications-table__decide {
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.4rem 0.75rem;
+}
+
+.applications-table__decide--approve:hover {
+  border-color: #2f7a4d;
+  color: #2f7a4d;
+}
+
+.applications-table__decide--reject:hover {
+  border-color: #b23b3b;
+  color: #b23b3b;
+}
+
+.applications-table__decide:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}

@@ -1,0 +1,65 @@
+# The whole app on AWS: the Express API (index.js via lambda.js) on /api/*
+# and the Vite build (dist/, via frontend.js) on everything else, behind one
+# HTTP API this stack owns. Deploy from the repo root:
+#   npm run deploy
+# DB_* and SESSION_SECRET must be in the shell environment (see backend/.env).
+org: jennagracejohnson3
+app: lightning-mcqueen
+service: lightning-mcqueen-app
+
+provider:
+  name: aws
+  runtime: nodejs22.x
+  region: us-east-2
+  timeout: 10
+  deploymentBucket:
+    name: team07-lightning-mcqueen-deploy
+  environment:
+    DB_HOST: ${env:DB_HOST}
+    DB_PORT: ${env:DB_PORT, '3306'}
+    DB_USER: ${env:DB_USER}
+    DB_PASSWORD: ${env:DB_PASSWORD}
+    DB_NAME: ${env:DB_NAME}
+    SESSION_SECRET: ${env:SESSION_SECRET}
+
+package:
+  patterns:
+    - '!**'
+    - index.js
+    - lambda.js
+    - frontend.js
+    - package.json
+    - dist/**
+    - node_modules/**
+    - '!node_modules/.bin/**'
+    - '!node_modules/vite/**'
+    - '!node_modules/@vitejs/**'
+    - '!node_modules/esbuild/**'
+    - '!node_modules/@esbuild/**'
+    - '!node_modules/rollup/**'
+    - '!node_modules/@rollup/**'
+    - '!node_modules/@babel/**'
+    - '!node_modules/react/**'
+    - '!node_modules/react-dom/**'
+    - '!node_modules/vitest/**'
+    - '!node_modules/@vitest/**'
+    - '!node_modules/jsdom/**'
+    - '!node_modules/@testing-library/**'
+    - '!node_modules/supertest/**'
+
+functions:
+  api:
+    handler: lambda.handler
+    events:
+      - httpApi:
+          path: /api/{proxy+}
+          method: '*'
+  frontend:
+    handler: frontend.handler
+    events:
+      - httpApi:
+          path: /
+          method: get
+      - httpApi:
+          path: /{proxy+}
+          method: get

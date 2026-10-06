@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import Navbar from './components/Navbar.jsx';
 import ProfileCard from './components/ProfileCard.jsx';
 import PointsCard from './components/PointsCard.jsx';
@@ -10,8 +10,9 @@ import SponsorsPage from './components/SponsorsPage.jsx';
 import MyApplicationPage from './components/MyApplicationPage.jsx';
 import AdminHomePage from './components/AdminHomePage.jsx';
 import AdminDriversPage from './components/AdminDriversPage.jsx';
+import SponsorApplicationsPage from './components/SponsorApplicationsPage.jsx';
 
-const driver = {
+const emptyDriver = {
   name: '',
   dateJoined: '',
   sponsorName: '',
@@ -26,6 +27,8 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [checkingSession, setCheckingSession] = useState(true);
   const [activeTab, setActiveTab] = useState('purchases');
+  const [pendingCount, setPendingCount] = useState(0);
+  const [driverData, setDriverData] = useState(null);
   const [currentPage, setCurrentPage] = useState(() => {
     const pathname = window.location.pathname;
     if (pathname === '/about') return 'about';
@@ -35,6 +38,7 @@ export default function App() {
     if (pathname === '/application') return 'application';
     if (pathname === '/admin') return 'admin';
     if (pathname === '/admin/drivers') return 'drivers';
+    if (pathname === '/sponsor/applications') return 'sponsor-applications';
     return 'dashboard';
   });
 
@@ -56,10 +60,37 @@ export default function App() {
       application: '/application',
       admin: '/admin',
       drivers: '/admin/drivers',
+      'sponsor-applications': '/sponsor/applications',
     };
     const path = pathMap[currentPage] || '/';
     window.history.pushState({}, '', path);
   }, [currentPage]);
+
+  // Sponsor nav badge: count of this sponsor's pending applications, loaded on
+  // login and kept current by SponsorApplicationsPage after each decision.
+  useEffect(() => {
+    if (user?.role !== 'sponsor' || !user.sponsorId) {
+      setPendingCount(0);
+      return;
+    }
+    fetch('/api/applications?status=pending')
+      .then((response) => response.ok ? response.json() : [])
+      .then((rows) => setPendingCount(rows.length))
+      .catch(() => setPendingCount(0));
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      setDriverData(null);
+      return;
+    }
+    fetch('/api/driver', { credentials: 'include' })
+      .then((response) => response.ok ? response.json() : null)
+      .then(setDriverData)
+      .catch(() => setDriverData(null));
+  }, [user]);
+
+  const handlePendingCountChange = useCallback((count) => setPendingCount(count), []);
 
   if (checkingSession) return <div className="state-screen">Checking your session...</div>;
   if (!user) return <AuthPage onAuthenticated={(authenticatedUser) => {
@@ -67,12 +98,18 @@ export default function App() {
     setCurrentPage(authenticatedUser.role === 'admin' ? 'admin' : 'dashboard');
   }} />;
 
+  const driver = { ...emptyDriver, ...driverData };
+
   const handleProfileUpdate = (updatedUser) => {
     setUser(updatedUser);
   };
   const isAdmin = user.role === 'admin';
   const adminPages = ['admin', 'drivers', 'user-log'];
-  const visiblePage = !isAdmin && adminPages.includes(currentPage) ? 'dashboard' : currentPage;
+  const isSponsor = user.role === 'sponsor';
+  const sponsorPages = ['sponsor-applications'];
+  const visiblePage = (!isAdmin && adminPages.includes(currentPage)) || (!isSponsor && sponsorPages.includes(currentPage))
+    ? 'dashboard'
+    : currentPage;
 
   return (
     <div className="app">
@@ -80,6 +117,7 @@ export default function App() {
         driverName={`${user.firstName} ${user.lastName}`}
         userRole={user.role}
         currentPage={visiblePage}
+        pendingCount={pendingCount}
         onPageChange={setCurrentPage}
         onLogout={() => {
           setUser(null);
@@ -91,6 +129,8 @@ export default function App() {
         <AdminHomePage user={user} onPageChange={setCurrentPage} />
       ) : visiblePage === 'drivers' ? (
         <AdminDriversPage />
+      ) : visiblePage === 'sponsor-applications' ? (
+        <SponsorApplicationsPage user={user} onPendingCountChange={handlePendingCountChange} />
       ) : visiblePage === 'about' ? (
         <AboutPage />
       ) : visiblePage === 'account' ? (
