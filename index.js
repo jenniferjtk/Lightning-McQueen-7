@@ -837,8 +837,8 @@ app.post('/api/points/apply', requireRole('sponsor'), async (req, res) => {
 });
 
 // Dashboard data for the signed-in user. The sponsor is whichever sponsor(s)
-// approved this driver's application. Points and purchases aren't stored yet,
-// so they stay empty until those tables exist.
+// approved this driver's application. The balance and recent updates come
+// from point_audit_log; purchases aren't stored yet, so they stay empty.
 app.get('/api/driver', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
 
@@ -858,12 +858,35 @@ app.get('/api/driver', async (req, res) => {
       [req.session.userId],
     );
 
+    const [[balance]] = await pool.execute(
+      `SELECT COALESCE(SUM(r.pt_value), 0) AS points
+       FROM point_audit_log l
+       JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+       WHERE l.affected_user_id = ?`,
+      [req.session.userId],
+    );
+    const [recent] = await pool.execute(
+      `SELECT l.log_id, r.description, r.pt_value, DATE_FORMAT(l.timestamp, '%b %e, %Y') AS date
+       FROM point_audit_log l
+       JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+       WHERE l.affected_user_id = ?
+       ORDER BY l.timestamp DESC, l.log_id DESC
+       LIMIT 5`,
+      [req.session.userId],
+    );
+
     return res.json({
       id: users[0].user_id,
       name: `${users[0].first_name} ${users[0].last_name}`.trim(),
       dateJoined: users[0].created_at,
       sponsorName: sponsors.map((sponsor) => sponsor.name).join(', '),
-      points: 0,
+      points: Number(balance.points),
+      balanceNotifications: recent.map((entry) => ({
+        id: entry.log_id,
+        label: entry.description || 'Point adjustment',
+        date: entry.date,
+        amount: Number(entry.pt_value),
+      })),
       recentPurchases: [],
     });
   } catch (error) {
