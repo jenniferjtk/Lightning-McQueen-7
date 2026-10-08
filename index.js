@@ -784,6 +784,58 @@ app.get('/api/points/trend', requireRole('driver'), async (req, res) => {
   }
 });
 
+// A sponsor applies one of its own point rules to a driver in its program,
+// which writes the point_audit_log row the driver's point charts read. The
+// sponsor comes from the session; the rule supplies the amount and reason so
+// neither is trusted from the client.
+app.post('/api/points/apply', requireRole('sponsor'), async (req, res) => {
+  const driverUserId = Number(req.body?.driverUserId);
+  const ruleId = Number(req.body?.ruleId);
+  const comment = typeof req.body?.comment === 'string' ? req.body.comment.trim() : '';
+  if (!Number.isSafeInteger(driverUserId) || driverUserId < 1) {
+    return res.status(400).json({ message: 'Choose a valid driver.' });
+  }
+  if (!Number.isSafeInteger(ruleId) || ruleId < 1) {
+    return res.status(400).json({ message: 'Choose a point rule.' });
+  }
+  if (comment.length > 45) {
+    return res.status(400).json({ message: 'Comment must be 45 characters or fewer.' });
+  }
+
+  try {
+    const [rules] = await pool.execute(
+      'SELECT rule_id, sponsor_id, pt_value, description FROM sponsor_rules WHERE rule_id = ?',
+      [ruleId],
+    );
+    if (!rules[0]) return res.status(404).json({ message: 'No point rule found with that id.' });
+    if (Number(rules[0].sponsor_id) !== Number(req.currentUser.sponsor_id)) {
+      return res.status(403).json({ message: 'This point rule belongs to a different sponsor.' });
+    }
+
+    const [approved] = await pool.execute(
+      "SELECT application_id FROM driver_applications WHERE driver_user_id = ? AND sponsor_id = ? AND status = 'approved'",
+      [driverUserId, req.currentUser.sponsor_id],
+    );
+    if (!approved[0]) return res.status(403).json({ message: 'This driver is not in your sponsor program.' });
+
+    const [result] = await pool.execute(
+      `INSERT INTO point_audit_log (actor_id, sponsor_rule_id, affected_user_id, timestamp, comment)
+       VALUES (?, ?, ?, CURDATE(), ?)`,
+      [req.currentUser.user_id, ruleId, driverUserId, comment || null],
+    );
+    return res.status(201).json({
+      log_id: result.insertId,
+      driver_user_id: driverUserId,
+      rule_id: ruleId,
+      reason: rules[0].description,
+      change_amount: Number(rules[0].pt_value),
+    });
+  } catch (error) {
+    console.error('Point rule apply failed:', error.message);
+    return res.status(500).json({ message: 'Unable to apply the point rule.' });
+  }
+});
+
 // Dashboard data for the signed-in user. The sponsor is whichever sponsor(s)
 // approved this driver's application. Points and purchases aren't stored yet,
 // so they stay empty until those tables exist.
