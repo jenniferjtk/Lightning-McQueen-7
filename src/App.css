@@ -1461,6 +1461,44 @@ body {
   color: #b23b3b;
 }
 
+.adjust-points {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.adjust-points__select,
+.adjust-points__comment {
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  background: var(--color-card);
+  color: var(--color-ink);
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.35rem 0.5rem;
+}
+
+.adjust-points__comment {
+  width: 10rem;
+}
+
+.adjust-points__hint,
+.adjust-points__status {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--color-slate);
+}
+
+.adjust-points__status--success {
+  color: #2f7a4d;
+}
+
+.adjust-points__status--error {
+  color: #b23b3b;
+}
+
 .applications-table__decide:disabled {
   cursor: wait;
   opacity: 0.7;
