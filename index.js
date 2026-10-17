@@ -382,6 +382,9 @@ app.get('/api/driver/conversion', async (req, res) => {
   } catch (error) {
     console.error('Driver conversion lookup failed:', error.message);
     return res.status(500).json({ message: 'Unable to load the point value.' });
+  }
+});
+
 app.get('/api/admin/sponsors', requireAdmin, async (req, res) => {
   try {
     const [rows] = await pool.execute(
