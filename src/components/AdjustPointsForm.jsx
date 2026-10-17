@@ -4,7 +4,7 @@ const formatPoints = (value) => `${value > 0 ? '+' : ''}${value.toLocaleString()
 
 // Lets a sponsor apply one of its point rules to an approved driver. The
 // server takes the amount and reason from the rule.
-export default function AdjustPointsForm({ driverUserId, rules }) {
+export default function AdjustPointsForm({ driverUserId, rules, onApplied }) {
   const [ruleId, setRuleId] = useState('');
   const [comment, setComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -29,6 +29,7 @@ export default function AdjustPointsForm({ driverUserId, rules }) {
       setStatus({ type: 'success', message: `${formatPoints(data.change_amount)} for ${data.reason}` });
       setRuleId('');
       setComment('');
+      onApplied?.(Number(data.change_amount));
     } catch (error) {
       setStatus({ type: 'error', message: error.message });
     } finally {

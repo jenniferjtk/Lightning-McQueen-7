@@ -137,7 +137,7 @@ export default function App() {
       ) : visiblePage === 'sponsor-applications' ? (
         <SponsorApplicationsPage user={user} onPendingCountChange={handlePendingCountChange} />
       ) : visiblePage === 'sponsor-drivers' ? (
-        <SponsorDriversPage />
+        <SponsorDriversPage user={user} />
       ) : visiblePage === 'about' ? (
         <AboutPage />
       ) : visiblePage === 'account' ? (

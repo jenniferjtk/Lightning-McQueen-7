@@ -74,6 +74,37 @@ it('opens and closes a read-only application view for an individual driver', asy
   expect(screen.queryByRole('region', { name: 'Driver application' })).not.toBeInTheDocument();
 });
 
+it('loads this sponsor’s point rules and updates a driver balance after an adjustment', async () => {
+  const rules = [
+    { rule_id: 7, sponsor_id: 10, pt_value: 20, description: 'Safe driving bonus' },
+    { rule_id: 8, sponsor_id: 11, pt_value: 500, description: 'Another sponsor rule' },
+  ];
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url) => {
+    if (url === '/api/sponsor-rules') {
+      return { ok: true, json: async () => ({ rules }) };
+    }
+    if (url === '/api/points/apply') {
+      return { ok: true, json: async () => ({ change_amount: 20, reason: 'Safe driving bonus' }) };
+    }
+    return { ok: true, json: async () => ({ sponsorLinked: true, drivers }) };
+  }));
+  render(<SponsorDriversPage user={{ sponsorId: 10 }} />);
+
+  const table = await screen.findByRole('table');
+  fireEvent.click(within(table).getAllByRole('button', { name: 'View application' })[0]);
+
+  fireEvent.change(await screen.findByLabelText('Point rule'), { target: { value: '7' } });
+  expect(screen.queryByRole('option', { name: 'Another sponsor rule (+500 pts)' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+  expect(await screen.findByRole('status')).toHaveTextContent('+20 pts for Safe driving bonus');
+  expect(within(screen.getByRole('region', { name: 'Driver application' })).getByText('140')).toBeInTheDocument();
+  expect(fetch).toHaveBeenCalledWith('/api/points/apply', expect.objectContaining({
+    method: 'POST',
+    body: JSON.stringify({ driverUserId: 2, ruleId: 7, comment: '' }),
+  }));
+});
+
 it('reports failures loading sponsor drivers', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
     ok: false,

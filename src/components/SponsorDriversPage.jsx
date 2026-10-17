@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import AdjustPointsForm from './AdjustPointsForm.jsx';
 
 const SORT_OPTIONS = [
   { value: 'name-asc', label: 'Name (A to Z)' },
@@ -25,7 +26,7 @@ function formatDate(dateValue) {
     : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-export default function SponsorDriversPage() {
+export default function SponsorDriversPage({ user }) {
   const [drivers, setDrivers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -33,6 +34,9 @@ export default function SponsorDriversPage() {
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('name-asc');
   const [selectedDriverId, setSelectedDriverId] = useState(null);
+  const [rules, setRules] = useState([]);
+  const [rulesLoading, setRulesLoading] = useState(true);
+  const [rulesError, setRulesError] = useState('');
 
   useEffect(() => {
     fetch('/api/sponsor/drivers', { credentials: 'include' })
@@ -46,6 +50,19 @@ export default function SponsorDriversPage() {
       .catch((requestError) => setError(requestError.message))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    fetch('/api/sponsor-rules', { credentials: 'include' })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Unable to load point rules.');
+        if (!Array.isArray(data.rules)) throw new Error('Unable to load point rules.');
+        return data.rules.filter((rule) => Number(rule.sponsor_id) === Number(user?.sponsorId));
+      })
+      .then(setRules)
+      .catch((requestError) => setRulesError(requestError.message))
+      .finally(() => setRulesLoading(false));
+  }, [user?.sponsorId]);
 
   const visibleDrivers = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
@@ -138,7 +155,31 @@ export default function SponsorDriversPage() {
                   <dt>Decision date</dt>
                   <dd>{formatDate(selectedDriver.decidedAt)}</dd>
                 </div>
+                <div>
+                  <dt>Current points</dt>
+                  <dd>{pointValue(selectedDriver).toLocaleString()}</dd>
+                </div>
               </dl>
+              <div className="driver-management__point-adjustment">
+                <h3>Adjust points</h3>
+                {rulesLoading ? (
+                  <p className="driver-management-page__message">Loading point rules...</p>
+                ) : rulesError ? (
+                  <p className="driver-management-page__message" role="alert">{rulesError}</p>
+                ) : (
+                  <AdjustPointsForm
+                    driverUserId={selectedDriver.id}
+                    rules={rules}
+                    onApplied={(changeAmount) => {
+                      setDrivers((current) => current.map((driver) => (
+                        driver.id === selectedDriver.id
+                          ? { ...driver, points: pointValue(driver) + changeAmount }
+                          : driver
+                      )));
+                    }}
+                  />
+                )}
+              </div>
             </section>
           )}
 

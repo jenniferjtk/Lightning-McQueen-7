@@ -1464,6 +1464,17 @@ body {
   font-size: 0.9rem;
 }
 
+.driver-management__point-adjustment {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-line);
+}
+
+.driver-management__point-adjustment h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
 .driver-management__view-application {
   white-space: nowrap;
 }
