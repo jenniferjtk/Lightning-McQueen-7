@@ -10,6 +10,7 @@ import SponsorsPage from './components/SponsorsPage.jsx';
 import MyApplicationPage from './components/MyApplicationPage.jsx';
 import AdminHomePage from './components/AdminHomePage.jsx';
 import AdminDriversPage from './components/AdminDriversPage.jsx';
+import SponsorConversionCard from './components/SponsorConversionCard.jsx';
 import SponsorApplicationsPage from './components/SponsorApplicationsPage.jsx';
 import { PointsGainedChart, PointsLostChart, PointsTrendChart } from './components/PointCharts.jsx';
 
@@ -147,6 +148,7 @@ export default function App() {
           <div className="dashboard__top">
             <div className="dashboard__points-column">
               <PointsCard points={driver.points} />
+              <SponsorConversionCard userRole={user.role} />
               <section className="card points-activity-card">
                 <h2 className="card__title">Recent point updates</h2>
                 {driver.balanceNotifications.length === 0 ? (
