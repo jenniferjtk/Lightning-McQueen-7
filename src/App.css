@@ -1287,20 +1287,23 @@ body {
 }
 
 .sponsors-page,
-.applications-page {
+.applications-page,
+.driver-management-page {
   max-width: 920px;
   margin: 0 auto;
   padding: 4rem 1.5rem;
 }
 
 .sponsors-page__intro,
-.applications-page__intro {
+.applications-page__intro,
+.driver-management-page__intro {
   max-width: 680px;
   padding-bottom: 2rem;
 }
 
 .sponsors-page__eyebrow,
-.applications-page__eyebrow {
+.applications-page__eyebrow,
+.driver-management-page__eyebrow {
   margin: 0 0 1rem;
   color: var(--color-amber);
   font-family: var(--font-mono);
@@ -1310,14 +1313,16 @@ body {
 }
 
 .sponsors-page h1,
-.applications-page h1 {
+.applications-page h1,
+.driver-management-page h1 {
   margin: 0;
   font-size: clamp(2.4rem, 6vw, 4.5rem);
   line-height: 1.02;
 }
 
 .sponsors-page__intro > p:last-child,
-.applications-page__intro > p:last-child {
+.applications-page__intro > p:last-child,
+.driver-management-page__intro > p:last-child {
   max-width: 560px;
   margin: 1.25rem 0 0;
   color: var(--color-slate);
@@ -1326,9 +1331,164 @@ body {
 }
 
 .sponsors-page__empty,
-.applications-page__empty {
+.applications-page__empty,
+.driver-management-page__message {
   color: var(--color-slate);
   font-size: 0.95rem;
+}
+
+.driver-management__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.driver-management__controls label {
+  display: grid;
+  flex: 1 1 220px;
+  gap: 0.4rem;
+  color: var(--color-slate);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.driver-management__controls input,
+.driver-management__controls select {
+  min-height: 2.7rem;
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  padding: 0.55rem 0.7rem;
+  color: var(--color-asphalt);
+  font: inherit;
+}
+
+.driver-management__count {
+  margin: 0 0 0.8rem;
+  color: var(--color-slate);
+  font-size: 0.85rem;
+}
+
+.driver-management__table-wrap {
+  overflow-x: auto;
+}
+
+.driver-management__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.driver-management__table th {
+  text-align: left;
+  color: var(--color-slate);
+  font-weight: 600;
+  font-size: 0.82rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.driver-management__table td {
+  padding: 0.7rem 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.driver-management__table th:last-child,
+.driver-management__table td:last-child {
+  text-align: right;
+}
+
+.driver-management__application {
+  margin: 1.5rem 0;
+  padding: 1.25rem;
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  background: #f8f9fa;
+}
+
+.driver-management__application-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.driver-management__application-heading h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.driver-management__application-eyebrow {
+  margin: 0 0 0.4rem;
+  color: var(--color-slate);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.driver-management__application-heading button,
+.driver-management__view-application {
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--color-asphalt);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.45rem 0.65rem;
+}
+
+.driver-management__application-heading button:hover,
+.driver-management__view-application:hover {
+  border-color: var(--color-steel);
+}
+
+.driver-management__application-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1rem;
+  margin: 0;
+}
+
+.driver-management__application-details dt {
+  margin-bottom: 0.35rem;
+  color: var(--color-slate);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.driver-management__application-details dd {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.driver-management__point-adjustment {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-line);
+}
+
+.driver-management__point-adjustment h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.driver-management__view-application {
+  white-space: nowrap;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .sponsor-cards {

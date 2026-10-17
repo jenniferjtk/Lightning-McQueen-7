@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import AdjustPointsForm from './AdjustPointsForm.jsx';
 
 const FILTERS = [
   { label: 'All', value: 'all' },
@@ -23,7 +22,6 @@ export default function SponsorApplicationsPage({ user, onPendingCountChange }) 
   const [filter, setFilter] = useState('all');
   const [decidingId, setDecidingId] = useState(null);
   const [decideError, setDecideError] = useState('');
-  const [rules, setRules] = useState([]);
 
   useEffect(() => {
     fetch('/api/applications')
@@ -31,14 +29,6 @@ export default function SponsorApplicationsPage({ user, onPendingCountChange }) 
       .then(setApplications)
       .catch((error) => setLoadError(error.message))
       .finally(() => setLoading(false));
-  }, [user.sponsorId]);
-
-  // Only this sponsor's rules can be applied to its drivers.
-  useEffect(() => {
-    fetch('/api/sponsor-rules')
-      .then((response) => response.ok ? response.json() : { rules: [] })
-      .then((data) => setRules(data.rules.filter((rule) => Number(rule.sponsor_id) === Number(user.sponsorId))))
-      .catch(() => setRules([]));
   }, [user.sponsorId]);
 
   useEffect(() => {
@@ -149,9 +139,6 @@ export default function SponsorApplicationsPage({ user, onPendingCountChange }) 
                             Reject
                           </button>
                         </div>
-                      )}
-                      {application.status === 'approved' && (
-                        <AdjustPointsForm driverUserId={application.driver_user_id} rules={rules} />
                       )}
                     </td>
                   </tr>
