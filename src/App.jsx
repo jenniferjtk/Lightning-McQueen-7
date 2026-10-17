@@ -12,6 +12,7 @@ import AdminHomePage from './components/AdminHomePage.jsx';
 import AdminDriversPage from './components/AdminDriversPage.jsx';
 import SponsorConversionCard from './components/SponsorConversionCard.jsx';
 import SponsorApplicationsPage from './components/SponsorApplicationsPage.jsx';
+import SponsorDriversPage from './components/SponsorDriversPage.jsx';
 import { PointsGainedChart, PointsLostChart, PointsTrendChart } from './components/PointCharts.jsx';
 
 const emptyDriver = {
@@ -41,6 +42,7 @@ export default function App() {
     if (pathname === '/admin') return 'admin';
     if (pathname === '/admin/drivers') return 'drivers';
     if (pathname === '/sponsor/applications') return 'sponsor-applications';
+    if (pathname === '/sponsor/drivers') return 'sponsor-drivers';
     return 'dashboard';
   });
 
@@ -63,6 +65,7 @@ export default function App() {
       admin: '/admin',
       drivers: '/admin/drivers',
       'sponsor-applications': '/sponsor/applications',
+      'sponsor-drivers': '/sponsor/drivers',
     };
     const path = pathMap[currentPage] || '/';
     window.history.pushState({}, '', path);
@@ -108,7 +111,7 @@ export default function App() {
   const isAdmin = user.role === 'admin';
   const adminPages = ['admin', 'drivers', 'user-log'];
   const isSponsor = user.role === 'sponsor';
-  const sponsorPages = ['sponsor-applications'];
+  const sponsorPages = ['sponsor-applications', 'sponsor-drivers'];
   const visiblePage = (!isAdmin && adminPages.includes(currentPage)) || (!isSponsor && sponsorPages.includes(currentPage))
     ? 'dashboard'
     : currentPage;
@@ -133,6 +136,8 @@ export default function App() {
         <AdminDriversPage />
       ) : visiblePage === 'sponsor-applications' ? (
         <SponsorApplicationsPage user={user} onPendingCountChange={handlePendingCountChange} />
+      ) : visiblePage === 'sponsor-drivers' ? (
+        <SponsorDriversPage />
       ) : visiblePage === 'about' ? (
         <AboutPage />
       ) : visiblePage === 'account' ? (

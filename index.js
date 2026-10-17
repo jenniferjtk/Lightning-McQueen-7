@@ -609,14 +609,23 @@ app.get('/api/sponsor/drivers', async (req, res) => {
 
     const [drivers] = await pool.execute(
       `SELECT u.user_id AS id, u.first_name AS firstName, u.last_name AS lastName,
-              u.email, u.created_at AS createdAt
+              u.email, u.created_at AS createdAt, COALESCE(points.total, 0) AS points
        FROM driver_applications a
        JOIN users u ON u.user_id = a.driver_user_id
+       LEFT JOIN (
+         SELECT l.affected_user_id, SUM(r.pt_value) AS total
+         FROM point_audit_log l
+         JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+         GROUP BY l.affected_user_id
+       ) points ON points.affected_user_id = u.user_id
        WHERE a.sponsor_id = ? AND a.status = 'approved' AND u.role = 'driver'
        ORDER BY u.last_name, u.first_name, u.user_id`,
       [sponsorUser.sponsor_id],
     );
-    return res.json({ sponsorLinked: true, drivers });
+    return res.json({
+      sponsorLinked: true,
+      drivers: drivers.map((driver) => ({ ...driver, points: Number(driver.points) })),
+    });
   } catch (error) {
     console.error('Sponsor driver list failed:', error.message);
     return res.status(500).json({ message: 'Unable to load sponsor drivers.' });
