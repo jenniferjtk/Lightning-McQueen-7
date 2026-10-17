@@ -61,3 +61,27 @@ it('reports failures loading sponsor drivers', async () => {
   render(<SponsorDriversPage />);
   expect(await screen.findByRole('alert')).toHaveTextContent('Unable to load sponsor drivers.');
 });
+
+it('keeps rendering when the sponsor API response does not include point balances', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      sponsorLinked: true,
+      drivers: [{ id: 1, firstName: 'Dana', lastName: 'Driver', email: 'dana@example.com' }],
+    }),
+  }));
+  render(<SponsorDriversPage />);
+
+  const table = await screen.findByRole('table');
+  expect(within(table).getByRole('cell', { name: 'Dana Driver' })).toBeInTheDocument();
+  expect(within(table).getByRole('cell', { name: '0' })).toBeInTheDocument();
+});
+
+it('shows an error instead of crashing when the API response has no driver list', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ sponsorLinked: true }),
+  }));
+  render(<SponsorDriversPage />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('Unable to load drivers.');
+});

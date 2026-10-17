@@ -8,8 +8,13 @@ const SORT_OPTIONS = [
 ];
 
 function compareNames(left, right) {
-  const firstNameOrder = left.firstName.localeCompare(right.firstName);
-  return firstNameOrder || left.lastName.localeCompare(right.lastName);
+  const firstNameOrder = String(left.firstName ?? '').localeCompare(String(right.firstName ?? ''));
+  return firstNameOrder || String(left.lastName ?? '').localeCompare(String(right.lastName ?? ''));
+}
+
+function pointValue(driver) {
+  const points = Number(driver.points ?? 0);
+  return Number.isFinite(points) ? points : 0;
 }
 
 export default function SponsorDriversPage() {
@@ -25,6 +30,7 @@ export default function SponsorDriversPage() {
       .then(async (response) => {
         const data = await response.json();
         if (!response.ok) throw new Error(data.message || 'Unable to load drivers.');
+        if (!Array.isArray(data.drivers)) throw new Error('Unable to load drivers.');
         setDrivers(data.drivers);
         setSponsorLinked(data.sponsorLinked);
       })
@@ -35,7 +41,7 @@ export default function SponsorDriversPage() {
   const visibleDrivers = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
     const filtered = query
-      ? drivers.filter((driver) => `${driver.firstName} ${driver.lastName}`.toLocaleLowerCase().includes(query))
+      ? drivers.filter((driver) => `${driver.firstName ?? ''} ${driver.lastName ?? ''}`.toLocaleLowerCase().includes(query))
       : drivers;
 
     return [...filtered].sort((left, right) => {
@@ -43,7 +49,7 @@ export default function SponsorDriversPage() {
         const comparison = compareNames(left, right);
         return sort === 'name-asc' ? comparison : -comparison;
       }
-      const pointsOrder = Number(left.points) - Number(right.points);
+      const pointsOrder = pointValue(left) - pointValue(right);
       return sort === 'points-asc' ? pointsOrder : -pointsOrder;
     });
   }, [drivers, search, sort]);
@@ -107,7 +113,7 @@ export default function SponsorDriversPage() {
                     <tr key={driver.id}>
                       <td>{driver.firstName} {driver.lastName}</td>
                       <td>{driver.email}</td>
-                      <td>{driver.points.toLocaleString()}</td>
+                      <td>{pointValue(driver).toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>
