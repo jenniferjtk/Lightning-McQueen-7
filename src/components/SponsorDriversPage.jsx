@@ -17,6 +17,14 @@ function pointValue(driver) {
   return Number.isFinite(points) ? points : 0;
 }
 
+function formatDate(dateValue) {
+  if (!dateValue) return 'Not available';
+  const date = new Date(dateValue);
+  return Number.isNaN(date.getTime())
+    ? 'Not available'
+    : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 export default function SponsorDriversPage() {
   const [drivers, setDrivers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -24,6 +32,7 @@ export default function SponsorDriversPage() {
   const [sponsorLinked, setSponsorLinked] = useState(true);
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('name-asc');
+  const [selectedDriverId, setSelectedDriverId] = useState(null);
 
   useEffect(() => {
     fetch('/api/sponsor/drivers', { credentials: 'include' })
@@ -53,6 +62,7 @@ export default function SponsorDriversPage() {
       return sort === 'points-asc' ? pointsOrder : -pointsOrder;
     });
   }, [drivers, search, sort]);
+  const selectedDriver = drivers.find((driver) => driver.id === selectedDriverId);
 
   return (
     <main className="driver-management-page">
@@ -94,6 +104,44 @@ export default function SponsorDriversPage() {
             {visibleDrivers.length} {visibleDrivers.length === 1 ? 'driver' : 'drivers'}
           </p>
 
+          {selectedDriver && (
+            <section className="driver-management__application" aria-label="Driver application">
+              <div className="driver-management__application-heading">
+                <div>
+                  <p className="driver-management__application-eyebrow">Driver application</p>
+                  <h2>{selectedDriver.firstName} {selectedDriver.lastName}</h2>
+                </div>
+                <button type="button" onClick={() => setSelectedDriverId(null)}>Close application</button>
+              </div>
+              <dl className="driver-management__application-details">
+                <div>
+                  <dt>Email</dt>
+                  <dd>{selectedDriver.email}</dd>
+                </div>
+                <div>
+                  <dt>Sponsor</dt>
+                  <dd>{selectedDriver.sponsorName || 'Your organization'}</dd>
+                </div>
+                <div>
+                  <dt>Status</dt>
+                  <dd>
+                    <span className={`applications-table__status applications-table__status--${selectedDriver.status || 'approved'}`}>
+                      {selectedDriver.status || 'approved'}
+                    </span>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Submitted</dt>
+                  <dd>{formatDate(selectedDriver.submittedAt)}</dd>
+                </div>
+                <div>
+                  <dt>Decision date</dt>
+                  <dd>{formatDate(selectedDriver.decidedAt)}</dd>
+                </div>
+              </dl>
+            </section>
+          )}
+
           {visibleDrivers.length === 0 ? (
             <p className="driver-management-page__message">
               {drivers.length === 0 ? 'No drivers have joined your organization yet.' : 'No drivers match your search.'}
@@ -106,6 +154,7 @@ export default function SponsorDriversPage() {
                     <th scope="col">Driver</th>
                     <th scope="col">Email</th>
                     <th scope="col">Points</th>
+                    <th scope="col"><span className="visually-hidden">Actions</span></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -114,6 +163,16 @@ export default function SponsorDriversPage() {
                       <td>{driver.firstName} {driver.lastName}</td>
                       <td>{driver.email}</td>
                       <td>{pointValue(driver).toLocaleString()}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="driver-management__view-application"
+                          aria-pressed={selectedDriverId === driver.id}
+                          onClick={() => setSelectedDriverId(driver.id)}
+                        >
+                          {selectedDriverId === driver.id ? 'Viewing application' : 'View application'}
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

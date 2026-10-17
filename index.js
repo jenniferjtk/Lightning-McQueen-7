@@ -609,9 +609,12 @@ app.get('/api/sponsor/drivers', async (req, res) => {
 
     const [drivers] = await pool.execute(
       `SELECT u.user_id AS id, u.first_name AS firstName, u.last_name AS lastName,
-              u.email, u.created_at AS createdAt, COALESCE(points.total, 0) AS points
+              u.email, u.created_at AS createdAt, COALESCE(points.total, 0) AS points,
+              a.application_id AS applicationId, a.status, a.submitted_at AS submittedAt,
+              a.decided_at AS decidedAt, s.name AS sponsorName
        FROM driver_applications a
        JOIN users u ON u.user_id = a.driver_user_id
+       JOIN sponsors s ON s.sponsor_id = a.sponsor_id
        LEFT JOIN (
          SELECT l.affected_user_id, SUM(r.pt_value) AS total
          FROM point_audit_log l

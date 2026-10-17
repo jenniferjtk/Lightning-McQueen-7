@@ -7,9 +7,9 @@ import SponsorDriversPage from '../../src/components/SponsorDriversPage.jsx';
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 const drivers = [
-  { id: 1, firstName: 'Dana', lastName: 'Driver', email: 'dana@example.com', points: 25 },
-  { id: 2, firstName: 'Alex', lastName: 'Racer', email: 'alex@example.com', points: 120 },
-  { id: 3, firstName: 'Casey', lastName: 'Driver', email: 'casey@example.com', points: 60 },
+  { id: 1, firstName: 'Dana', lastName: 'Driver', email: 'dana@example.com', points: 25, sponsorName: 'Roadrunner Logistics', status: 'approved', submittedAt: '2026-10-01T12:00:00Z', decidedAt: '2026-10-02T12:00:00Z' },
+  { id: 2, firstName: 'Alex', lastName: 'Racer', email: 'alex@example.com', points: 120, sponsorName: 'Roadrunner Logistics', status: 'approved', submittedAt: '2026-10-03T12:00:00Z', decidedAt: '2026-10-04T12:00:00Z' },
+  { id: 3, firstName: 'Casey', lastName: 'Driver', email: 'casey@example.com', points: 60, sponsorName: 'Roadrunner Logistics', status: 'approved', submittedAt: '2026-10-05T12:00:00Z', decidedAt: '2026-10-06T12:00:00Z' },
 ];
 
 it('loads sponsor drivers, searches by full name, and sorts by name or points', async () => {
@@ -51,6 +51,27 @@ it('shows an empty state when the search finds no drivers', async () => {
   await screen.findByRole('table');
   fireEvent.change(screen.getByLabelText('Search drivers'), { target: { value: 'unknown' } });
   expect(screen.getByText('No drivers match your search.')).toBeInTheDocument();
+});
+
+it('opens and closes a read-only application view for an individual driver', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ sponsorLinked: true, drivers }),
+  }));
+  render(<SponsorDriversPage />);
+
+  const table = await screen.findByRole('table');
+  fireEvent.click(within(table).getAllByRole('button', { name: 'View application' })[0]);
+
+  const application = screen.getByRole('region', { name: 'Driver application' });
+  expect(within(application).getByRole('heading', { name: 'Alex Racer' })).toBeInTheDocument();
+  expect(application).toHaveTextContent('Roadrunner Logistics');
+  expect(application).toHaveTextContent('approved');
+  expect(application).toHaveTextContent('Oct 3, 2026');
+  expect(application).toHaveTextContent('Oct 4, 2026');
+
+  fireEvent.click(within(application).getByRole('button', { name: 'Close application' }));
+  expect(screen.queryByRole('region', { name: 'Driver application' })).not.toBeInTheDocument();
 });
 
 it('reports failures loading sponsor drivers', async () => {

@@ -24,6 +24,11 @@ describe('sponsor driver list', () => {
       email: users.driver.email,
       createdAt: '2026-10-01',
       points: '125',
+      applicationId: 44,
+      status: 'approved',
+      submittedAt: '2026-10-01T12:00:00.000Z',
+      decidedAt: '2026-10-02T12:00:00.000Z',
+      sponsorName: 'Acme Trucking',
     };
     mockQueries([
       ['SELECT role, sponsor_id FROM users', [users.sponsor]],
@@ -37,6 +42,8 @@ describe('sponsor driver list', () => {
     expect(listQuery[1]).toEqual([users.sponsor.sponsor_id]);
     expect(listQuery[0]).toContain("a.status = 'approved'");
     expect(listQuery[0]).toContain('point_audit_log');
+    expect(listQuery[0]).toContain('a.application_id AS applicationId');
+    expect(listQuery[0]).toContain('a.submitted_at AS submittedAt');
   });
 
   it('rejects non-sponsor accounts', async () => {
