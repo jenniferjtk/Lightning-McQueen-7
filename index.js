@@ -3,12 +3,18 @@ import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 import session from 'express-session';
+import MySQLStoreFactory from 'express-mysql-session';
 import mysql from 'mysql2/promise';
 
 dotenv.config();
 
 const app = express();
+// Set by the Lambda runtime; absent when running locally with `npm run server`.
+const isLambda = Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME);
 const PORT = process.env.PORT || 4000;
+// API Gateway terminates TLS, so trust its X-Forwarded-Proto; without this
+// express-session refuses to send the Secure cookie.
+if (isLambda) app.set('trust proxy', 1);
 const pool = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
   port: Number(process.env.DB_PORT || 3306),
@@ -21,14 +27,30 @@ const pool = mysql.createPool({
 
 app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
 app.use(express.json());
+// Lambda instances share no memory, so sessions must live in MySQL there
+// (table from backend/db/migrations/004_sessions_table.sql). Local runs keep
+// the default in-memory store.
+const MySQLStore = MySQLStoreFactory(session);
+const sessionStore = isLambda
+  ? new MySQLStore({
+    host: process.env.DB_HOST,
+    port: Number(process.env.DB_PORT || 3306),
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    createDatabaseTable: false,
+  })
+  : undefined;
+
 app.use(session({
+  store: sessionStore,
   secret: process.env.SESSION_SECRET || 'development-session-secret',
   resave: false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    secure: isLambda || process.env.NODE_ENV === 'production',
     maxAge: 1000 * 60 * 60 * 8,
   },
 }));
@@ -39,6 +61,7 @@ const publicUser = (user) => ({
   role: user.role,
   firstName: user.first_name,
   lastName: user.last_name,
+  sponsorId: user.sponsor_id ?? null,
 });
 
 const adminDriver = (user) => ({
@@ -149,7 +172,7 @@ app.get('/api/auth/me', async (req, res) => {
 
   try {
     const [rows] = await pool.execute(
-      'SELECT user_id, email, role, first_name, last_name FROM users WHERE user_id = ?',
+      'SELECT user_id, email, role, first_name, last_name, sponsor_id FROM users WHERE user_id = ?',
       [req.session.userId],
     );
     if (!rows[0]) {
@@ -187,6 +210,7 @@ app.post('/api/auth/register', async (req, res) => {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         role: 'driver',
+        sponsorId: null,
       },
     });
   } catch (error) {
@@ -211,6 +235,33 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (error) {
     console.error('Login failed:', error.message);
     return res.status(500).json({ message: 'Unable to sign you in.' });
+  }
+});
+
+app.post('/api/auth/change-password', async (req, res) => {
+  if (!req.session.userId) return res.status(401).json({ message: 'Please sign in again to change your password.' });
+
+  const { currentPassword, newPassword } = req.body || {};
+  if (typeof currentPassword !== 'string' || typeof newPassword !== 'string') {
+    return res.status(400).json({ message: 'Enter your current password and a new password.' });
+  }
+  if (newPassword.length < 8) {
+    return res.status(400).json({ message: 'New password must be at least 8 characters.' });
+  }
+
+  try {
+    const [rows] = await pool.execute('SELECT password_hash FROM users WHERE user_id = ?', [req.session.userId]);
+    if (!rows[0]) return res.status(401).json({ message: 'Your account could not be found. Please sign in again.' });
+    if (!(await bcrypt.compare(currentPassword, rows[0].password_hash))) {
+      return res.status(400).json({ message: 'Current password is incorrect.' });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await pool.execute('UPDATE users SET password_hash = ? WHERE user_id = ?', [passwordHash, req.session.userId]);
+    return res.json({ message: 'Password updated successfully.' });
+  } catch (error) {
+    console.error('Password change failed:', error.message);
+    return res.status(500).json({ message: 'Unable to update your password right now.' });
   }
 });
 
@@ -331,6 +382,49 @@ app.get('/api/driver/conversion', async (req, res) => {
   } catch (error) {
     console.error('Driver conversion lookup failed:', error.message);
     return res.status(500).json({ message: 'Unable to load the point value.' });
+app.get('/api/admin/sponsors', requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT user_id, email, first_name, last_name, created_at
+       FROM users WHERE role = 'sponsor' ORDER BY created_at DESC, user_id DESC`,
+    );
+    return res.json({ sponsors: rows.map(adminDriver) });
+  } catch (error) {
+    console.error('Sponsor user list failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load sponsor accounts.' });
+  }
+});
+
+app.post('/api/admin/users', requireAdmin, async (req, res) => {
+  const { email, password, firstName, lastName, role } = req.body || {};
+  if (!['driver', 'admin', 'sponsor'].includes(role)) {
+    return res.status(400).json({ message: 'Choose a driver, admin, or sponsor role.' });
+  }
+  if (!validEmail(email) || typeof password !== 'string' || !password ||
+      typeof firstName !== 'string' || !firstName.trim() ||
+      typeof lastName !== 'string' || !lastName.trim()) {
+    return res.status(400).json({ message: 'A first name, last name, valid email, and password are required.' });
+  }
+  if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters.' });
+  if (Buffer.byteLength(password, 'utf8') > 72) {
+    return res.status(400).json({ message: 'Password must be 72 bytes or fewer.' });
+  }
+  try {
+    const passwordHash = await bcrypt.hash(password, 12);
+    const [result] = await pool.execute(
+      `INSERT INTO users (email, password_hash, role, first_name, last_name, created_at)
+       VALUES (?, ?, ?, ?, ?, NOW())`,
+      [email.trim().toLowerCase(), passwordHash, role, firstName.trim(), lastName.trim()],
+    );
+    const [rows] = await pool.execute(
+      'SELECT user_id, email, role, first_name, last_name, created_at FROM users WHERE user_id = ?',
+      [result.insertId],
+    );
+    return res.status(201).json({ user: { ...adminDriver(rows[0]), role: rows[0].role } });
+  } catch (error) {
+    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ message: 'An account with that email already exists.' });
+    console.error('User creation failed:', error.message);
+    return res.status(500).json({ message: 'Unable to create the user account.' });
   }
 });
 
@@ -420,6 +514,112 @@ app.delete('/api/admin/drivers/:driverId', requireAdmin, async (req, res) => {
   }
 });
 
+app.put('/api/admin/sponsors/:sponsorId', requireAdmin, async (req, res) => {
+  const sponsorId = Number(req.params.sponsorId);
+  const { email, firstName, lastName } = req.body || {};
+  if (!Number.isSafeInteger(sponsorId) || sponsorId < 1 || !validEmail(email) || typeof firstName !== 'string' || !firstName.trim() || typeof lastName !== 'string' || !lastName.trim()) {
+    return res.status(400).json({ message: 'A first name, last name, and valid email are required.' });
+  }
+  try {
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedFirstName = firstName.trim();
+    const normalizedLastName = lastName.trim();
+    const [result] = await pool.execute(
+      `UPDATE users SET email = ?, first_name = ?, last_name = ?
+       WHERE user_id = ? AND role = 'sponsor'`,
+      [normalizedEmail, normalizedFirstName, normalizedLastName, sponsorId],
+    );
+    if (!result.affectedRows) return res.status(404).json({ message: 'Sponsor account not found.' });
+    return res.json({
+      sponsor: {
+        id: sponsorId,
+        email: normalizedEmail,
+        firstName: normalizedFirstName,
+        lastName: normalizedLastName,
+      },
+    });
+  } catch (error) {
+    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ message: 'An account with that email already exists.' });
+    console.error('Sponsor update failed:', error.message);
+    return res.status(500).json({ message: 'Unable to update the sponsor account.' });
+  }
+});
+
+app.put('/api/admin/sponsors/:sponsorId/password', requireAdmin, async (req, res) => {
+  const sponsorId = Number(req.params.sponsorId);
+  const { password } = req.body || {};
+  if (!Number.isSafeInteger(sponsorId) || sponsorId < 1) {
+    return res.status(400).json({ message: 'Invalid sponsor account.' });
+  }
+  if (typeof password !== 'string' || password.length < 8) {
+    return res.status(400).json({ message: 'Password must be at least 8 characters.' });
+  }
+  if (Buffer.byteLength(password, 'utf8') > 72) {
+    return res.status(400).json({ message: 'Password must be 72 bytes or fewer.' });
+  }
+  try {
+    const passwordHash = await bcrypt.hash(password, 12);
+    const [result] = await pool.execute(
+      "UPDATE users SET password_hash = ? WHERE user_id = ? AND role = 'sponsor'",
+      [passwordHash, sponsorId],
+    );
+    if (!result.affectedRows) return res.status(404).json({ message: 'Sponsor account not found.' });
+    return res.json({ message: 'Sponsor password reset.' });
+  } catch (error) {
+    console.error('Sponsor password reset failed:', error.message);
+    return res.status(500).json({ message: 'Unable to reset the sponsor password.' });
+  }
+});
+
+app.delete('/api/admin/sponsors/:sponsorId', requireAdmin, async (req, res) => {
+  const sponsorId = Number(req.params.sponsorId);
+  if (!Number.isSafeInteger(sponsorId) || sponsorId < 1) {
+    return res.status(400).json({ message: 'Invalid sponsor account.' });
+  }
+  try {
+    const [result] = await pool.execute(
+      "DELETE FROM users WHERE user_id = ? AND role = 'sponsor'",
+      [sponsorId],
+    );
+    if (!result.affectedRows) return res.status(404).json({ message: 'Sponsor account not found.' });
+    return res.status(204).end();
+  } catch (error) {
+    if (error.code === 'ER_ROW_IS_REFERENCED_2') {
+      return res.status(409).json({ message: 'This sponsor has related records and cannot be deleted.' });
+    }
+    console.error('Sponsor deletion failed:', error.message);
+    return res.status(500).json({ message: 'Unable to delete the sponsor account.' });
+  }
+});
+
+app.get('/api/sponsor/drivers', async (req, res) => {
+  if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
+  try {
+    const [sponsorRows] = await pool.execute(
+      "SELECT role, sponsor_id FROM users WHERE user_id = ?",
+      [req.session.userId],
+    );
+    const sponsorUser = sponsorRows[0];
+    if (!sponsorUser) return res.status(401).json({ message: 'Session expired.' });
+    if (sponsorUser.role !== 'sponsor') return res.status(403).json({ message: 'Sponsor access is required.' });
+    if (!sponsorUser.sponsor_id) return res.json({ sponsorLinked: false, drivers: [] });
+
+    const [drivers] = await pool.execute(
+      `SELECT u.user_id AS id, u.first_name AS firstName, u.last_name AS lastName,
+              u.email, u.created_at AS createdAt
+       FROM driver_applications a
+       JOIN users u ON u.user_id = a.driver_user_id
+       WHERE a.sponsor_id = ? AND a.status = 'approved' AND u.role = 'driver'
+       ORDER BY u.last_name, u.first_name, u.user_id`,
+      [sponsorUser.sponsor_id],
+    );
+    return res.json({ sponsorLinked: true, drivers });
+  } catch (error) {
+    console.error('Sponsor driver list failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load sponsor drivers.' });
+  }
+});
+
 app.get('/api/sponsor-rules', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
   try {
@@ -502,23 +702,330 @@ app.delete('/api/sponsor-rules/:ruleId', requireRuleManager, async (req, res) =>
   }
 });
 
-// Placeholder shape — replace with a real database query keyed off the
-// authenticated driver's ID. Field names must stay the same since the
-// frontend reads this exact shape.
-const driver = {
-  id: '',
-  name: '',
-  dateJoined: '',
-  sponsorName: '',
-  points: 0,
-  recentPurchases: [],
+// Loads the signed-in user onto req.currentUser and rejects anyone whose role
+// isn't listed. Application routes take the driver/sponsor identity from here,
+// never from the request body or query string.
+const requireRole = (...roles) => async (req, res, next) => {
+  if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
+  try {
+    const [rows] = await pool.execute('SELECT user_id, role, sponsor_id FROM users WHERE user_id = ?', [req.session.userId]);
+    if (!rows[0]) return res.status(401).json({ message: 'Session expired.' });
+    if (!roles.includes(rows[0].role)) return res.status(403).json({ message: 'You do not have access to this action.' });
+    if (rows[0].role === 'sponsor' && !rows[0].sponsor_id) {
+      return res.status(403).json({ message: 'Your account is not linked to a sponsor organization.' });
+    }
+    req.currentUser = rows[0];
+    return next();
+  } catch (error) {
+    console.error('Role authorization failed:', error.message);
+    return res.status(500).json({ message: 'Unable to authorize this request.' });
+  }
 };
 
-app.get('/api/driver', (req, res) => {
-  if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
-  res.json(driver);
+const APPLICATION_STATUSES = ['pending', 'approved', 'rejected', 'withdrawn'];
+
+app.get('/api/sponsors', async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      'SELECT sponsor_id, name, description, point_conversion_rate FROM sponsors ORDER BY name',
+    );
+    return res.json(rows);
+  } catch (error) {
+    console.error('Sponsor lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load sponsors.' });
+  }
 });
 
-app.listen(PORT, () => {
-  console.log(`Driver dashboard API running on http://localhost:${PORT}`);
+// Drivers see their own applications; sponsors see their organization's,
+// joined with each applying driver's profile.
+app.get('/api/applications', requireRole('driver', 'sponsor'), async (req, res) => {
+  const { status } = req.query;
+  if (status && !APPLICATION_STATUSES.includes(status)) {
+    return res.status(400).json({ message: `Status must be one of: ${APPLICATION_STATUSES.join(', ')}.` });
+  }
+
+  try {
+    if (req.currentUser.role === 'driver') {
+      const [rows] = await pool.execute(
+        `SELECT a.application_id, a.sponsor_id, s.name AS sponsor_name, a.status, a.submitted_at
+         FROM driver_applications a
+         JOIN sponsors s ON s.sponsor_id = a.sponsor_id
+         WHERE a.driver_user_id = ?${status ? ' AND a.status = ?' : ''}
+         ORDER BY a.submitted_at DESC`,
+        status ? [req.currentUser.user_id, status] : [req.currentUser.user_id],
+      );
+      return res.json(rows);
+    }
+
+    const [rows] = await pool.execute(
+      `SELECT a.application_id, a.status, a.submitted_at, a.decided_at,
+              u.user_id AS driver_user_id, u.first_name, u.last_name, u.email
+       FROM driver_applications a
+       JOIN users u ON u.user_id = a.driver_user_id
+       WHERE a.sponsor_id = ?${status ? ' AND a.status = ?' : ''}
+       ORDER BY a.submitted_at DESC`,
+      status ? [req.currentUser.sponsor_id, status] : [req.currentUser.sponsor_id],
+    );
+    return res.json(rows);
+  } catch (error) {
+    console.error('Application lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load applications.' });
+  }
 });
+
+app.post('/api/applications', requireRole('driver'), async (req, res) => {
+  const sponsorId = Number(req.body?.sponsorId);
+  if (!Number.isSafeInteger(sponsorId) || sponsorId < 1) {
+    return res.status(400).json({ message: 'Choose a valid sponsor.' });
+  }
+
+  try {
+    const [sponsors] = await pool.execute('SELECT sponsor_id FROM sponsors WHERE sponsor_id = ?', [sponsorId]);
+    if (!sponsors[0]) return res.status(400).json({ message: 'No sponsor found for that sponsor.' });
+
+    const [existing] = await pool.execute(
+      "SELECT application_id FROM driver_applications WHERE driver_user_id = ? AND sponsor_id = ? AND status IN ('pending', 'approved')",
+      [req.currentUser.user_id, sponsorId],
+    );
+    if (existing[0]) {
+      return res.status(409).json({ message: 'You already have a pending or approved application with this sponsor.' });
+    }
+
+    const [result] = await pool.execute(
+      "INSERT INTO driver_applications (driver_user_id, sponsor_id, status) VALUES (?, ?, 'pending')",
+      [req.currentUser.user_id, sponsorId],
+    );
+    return res.status(201).json({ application_id: result.insertId, sponsor_id: sponsorId, status: 'pending' });
+  } catch (error) {
+    console.error('Application create failed:', error.message);
+    return res.status(500).json({ message: 'Unable to submit your application.' });
+  }
+});
+
+app.patch('/api/applications/:applicationId/withdraw', requireRole('driver'), async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      'SELECT status FROM driver_applications WHERE application_id = ? AND driver_user_id = ?',
+      [req.params.applicationId, req.currentUser.user_id],
+    );
+    if (!rows[0]) return res.status(404).json({ message: 'No matching application was found.' });
+    if (rows[0].status !== 'pending') {
+      return res.status(409).json({ message: `Cannot withdraw an application with status "${rows[0].status}".` });
+    }
+
+    // status = 'pending' in the WHERE guards against a decision landing
+    // between the SELECT above and this UPDATE.
+    const [result] = await pool.execute(
+      "UPDATE driver_applications SET status = 'withdrawn' WHERE application_id = ? AND status = 'pending'",
+      [req.params.applicationId],
+    );
+    if (result.affectedRows === 0) return res.status(409).json({ message: 'Application is no longer pending.' });
+    return res.json({ application_id: Number(req.params.applicationId), status: 'withdrawn' });
+  } catch (error) {
+    console.error('Application withdraw failed:', error.message);
+    return res.status(500).json({ message: 'Unable to withdraw your application.' });
+  }
+});
+
+app.patch('/api/applications/:applicationId/decide', requireRole('sponsor'), async (req, res) => {
+  const { decision } = req.body || {};
+  if (!['approved', 'rejected'].includes(decision)) {
+    return res.status(400).json({ message: 'Decision must be "approved" or "rejected".' });
+  }
+
+  try {
+    const [rows] = await pool.execute(
+      'SELECT sponsor_id, status FROM driver_applications WHERE application_id = ?',
+      [req.params.applicationId],
+    );
+    if (!rows[0]) return res.status(404).json({ message: 'No application found with that id.' });
+    if (Number(rows[0].sponsor_id) !== Number(req.currentUser.sponsor_id)) {
+      return res.status(403).json({ message: 'This application belongs to a different sponsor.' });
+    }
+    if (rows[0].status !== 'pending') {
+      return res.status(409).json({ message: `Cannot decide an application with status "${rows[0].status}".` });
+    }
+
+    // status = 'pending' in the WHERE guards against a withdraw or second
+    // decision landing between the SELECT above and this UPDATE.
+    const [result] = await pool.execute(
+      "UPDATE driver_applications SET status = ?, decided_at = NOW() WHERE application_id = ? AND status = 'pending'",
+      [decision, req.params.applicationId],
+    );
+    if (result.affectedRows === 0) return res.status(409).json({ message: 'Application is no longer pending.' });
+    return res.json({ application_id: Number(req.params.applicationId), status: decision });
+  } catch (error) {
+    console.error('Application decision failed:', error.message);
+    return res.status(500).json({ message: 'Unable to save your decision.' });
+  }
+});
+
+// Point history charts for the signed-in driver. Each point_audit_log row
+// records one rule being applied to a driver; the rule's pt_value is the
+// change (negative = points lost) and its description is the reason. The
+// driver always comes from the session, never from the query string.
+const pointTotalsByReason = (sign) => async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT r.description AS reason, SUM(r.pt_value) AS total
+       FROM point_audit_log l
+       JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+       WHERE l.affected_user_id = ? AND r.pt_value ${sign === 'gains' ? '> 0' : '< 0'}
+       GROUP BY r.description`,
+      [req.currentUser.user_id],
+    );
+    // Losses are charted as positive sizes, largest first in both cases.
+    const totals = rows
+      .map((row) => ({ reason: row.reason || 'Unspecified', total: Math.abs(Number(row.total)) }))
+      .sort((a, b) => b.total - a.total);
+    return res.json(totals);
+  } catch (error) {
+    console.error(`Point ${sign} lookup failed:`, error.message);
+    return res.status(500).json({ message: 'Unable to load your point history.' });
+  }
+};
+
+app.get('/api/points/gains', requireRole('driver'), pointTotalsByReason('gains'));
+app.get('/api/points/losses', requireRole('driver'), pointTotalsByReason('losses'));
+
+app.get('/api/points/trend', requireRole('driver'), async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT DATE_FORMAT(l.timestamp, '%Y-%m-%d') AS date, SUM(r.pt_value) AS change_amount
+       FROM point_audit_log l
+       JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+       WHERE l.affected_user_id = ?
+       GROUP BY date
+       ORDER BY date`,
+      [req.currentUser.user_id],
+    );
+    let runningTotal = 0;
+    return res.json(rows.map((row) => {
+      runningTotal += Number(row.change_amount);
+      return { date: row.date, cumulative_total: runningTotal };
+    }));
+  } catch (error) {
+    console.error('Point trend lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load your point history.' });
+  }
+});
+
+// A sponsor applies one of its own point rules to a driver in its program,
+// which writes the point_audit_log row the driver's point charts read. The
+// sponsor comes from the session; the rule supplies the amount and reason so
+// neither is trusted from the client.
+app.post('/api/points/apply', requireRole('sponsor'), async (req, res) => {
+  const driverUserId = Number(req.body?.driverUserId);
+  const ruleId = Number(req.body?.ruleId);
+  const comment = typeof req.body?.comment === 'string' ? req.body.comment.trim() : '';
+  if (!Number.isSafeInteger(driverUserId) || driverUserId < 1) {
+    return res.status(400).json({ message: 'Choose a valid driver.' });
+  }
+  if (!Number.isSafeInteger(ruleId) || ruleId < 1) {
+    return res.status(400).json({ message: 'Choose a point rule.' });
+  }
+  if (comment.length > 45) {
+    return res.status(400).json({ message: 'Comment must be 45 characters or fewer.' });
+  }
+
+  try {
+    const [rules] = await pool.execute(
+      'SELECT rule_id, sponsor_id, pt_value, description FROM sponsor_rules WHERE rule_id = ?',
+      [ruleId],
+    );
+    if (!rules[0]) return res.status(404).json({ message: 'No point rule found with that id.' });
+    if (Number(rules[0].sponsor_id) !== Number(req.currentUser.sponsor_id)) {
+      return res.status(403).json({ message: 'This point rule belongs to a different sponsor.' });
+    }
+
+    const [approved] = await pool.execute(
+      "SELECT application_id FROM driver_applications WHERE driver_user_id = ? AND sponsor_id = ? AND status = 'approved'",
+      [driverUserId, req.currentUser.sponsor_id],
+    );
+    if (!approved[0]) return res.status(403).json({ message: 'This driver is not in your sponsor program.' });
+
+    const [result] = await pool.execute(
+      `INSERT INTO point_audit_log (actor_id, sponsor_rule_id, affected_user_id, timestamp, comment)
+       VALUES (?, ?, ?, CURDATE(), ?)`,
+      [req.currentUser.user_id, ruleId, driverUserId, comment || null],
+    );
+    return res.status(201).json({
+      log_id: result.insertId,
+      driver_user_id: driverUserId,
+      rule_id: ruleId,
+      reason: rules[0].description,
+      change_amount: Number(rules[0].pt_value),
+    });
+  } catch (error) {
+    console.error('Point rule apply failed:', error.message);
+    return res.status(500).json({ message: 'Unable to apply the point rule.' });
+  }
+});
+
+// Dashboard data for the signed-in user. The sponsor is whichever sponsor(s)
+// approved this driver's application. The balance and recent updates come
+// from point_audit_log; purchases aren't stored yet, so they stay empty.
+app.get('/api/driver', async (req, res) => {
+  if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
+
+  try {
+    const [users] = await pool.execute(
+      'SELECT user_id, first_name, last_name, created_at FROM users WHERE user_id = ?',
+      [req.session.userId],
+    );
+    if (!users[0]) return res.status(401).json({ message: 'Session expired.' });
+
+    const [sponsors] = await pool.execute(
+      `SELECT s.name
+       FROM driver_applications a
+       JOIN sponsors s ON s.sponsor_id = a.sponsor_id
+       WHERE a.driver_user_id = ? AND a.status = 'approved'
+       ORDER BY a.decided_at DESC`,
+      [req.session.userId],
+    );
+
+    const [[balance]] = await pool.execute(
+      `SELECT COALESCE(SUM(r.pt_value), 0) AS points
+       FROM point_audit_log l
+       JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+       WHERE l.affected_user_id = ?`,
+      [req.session.userId],
+    );
+    const [recent] = await pool.execute(
+      `SELECT l.log_id, r.description, r.pt_value, DATE_FORMAT(l.timestamp, '%b %e, %Y') AS date
+       FROM point_audit_log l
+       JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+       WHERE l.affected_user_id = ?
+       ORDER BY l.timestamp DESC, l.log_id DESC
+       LIMIT 5`,
+      [req.session.userId],
+    );
+
+    return res.json({
+      id: users[0].user_id,
+      name: `${users[0].first_name} ${users[0].last_name}`.trim(),
+      dateJoined: users[0].created_at,
+      sponsorName: sponsors.map((sponsor) => sponsor.name).join(', '),
+      points: Number(balance.points),
+      balanceNotifications: recent.map((entry) => ({
+        id: entry.log_id,
+        label: entry.description || 'Point adjustment',
+        date: entry.date,
+        amount: Number(entry.pt_value),
+      })),
+      recentPurchases: [],
+    });
+  } catch (error) {
+    console.error('Driver dashboard lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load your dashboard.' });
+  }
+});
+
+// Vitest imports the app and drives it with Supertest, so it must not bind a port.
+if (!isLambda && !process.env.VITEST) {
+  app.listen(PORT, () => {
+    console.log(`Driver dashboard API running on http://localhost:${PORT}`);
+  });
+}
+
+export { app };

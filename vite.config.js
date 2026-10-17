@@ -14,4 +14,11 @@ export default defineConfig({
       },
     },
   },
+  test: {
+    // API tests run in Node; frontend tests opt into jsdom with a
+    // `// @vitest-environment jsdom` comment at the top of the file.
+    environment: 'node',
+    include: ['tests/**/*.test.{js,jsx}'],
+    setupFiles: ['tests/setup.js'],
+  },
 });

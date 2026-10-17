@@ -4,6 +4,10 @@ const EMPTY_DRIVER = { firstName: '', lastName: '', email: '', password: '' };
 
 export default function AdminDriversPage() {
   const [drivers, setDrivers] = useState([]);
+  const [sponsors, setSponsors] = useState([]);
+  const [sponsorSearch, setSponsorSearch] = useState('');
+  const [sponsorsLoading, setSponsorsLoading] = useState(true);
+  const [sponsorsError, setSponsorsError] = useState('');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -15,6 +19,12 @@ export default function AdminDriversPage() {
   const [resettingId, setResettingId] = useState(null);
   const [resetPassword, setResetPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+
+  const [editingSponsorId, setEditingSponsorId] = useState(null);
+  const [editSponsor, setEditSponsor] = useState(null);
+  const [resettingSponsorId, setResettingSponsorId] = useState(null);
+  const [sponsorPassword, setSponsorPassword] = useState('');
+  const [confirmSponsorPassword, setConfirmSponsorPassword] = useState('');
 
   const loadDrivers = async () => {
     setLoading(true);
@@ -33,6 +43,29 @@ export default function AdminDriversPage() {
 
   useEffect(() => { loadDrivers(); }, []);
 
+  useEffect(() => {
+    const loadSponsors = async () => {
+      try {
+        const response = await fetch('/api/admin/sponsors', { credentials: 'include' });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Unable to load sponsor accounts.');
+        setSponsors(data.sponsors);
+      } catch (requestError) {
+        setSponsorsError(requestError.message);
+      } finally {
+        setSponsorsLoading(false);
+      }
+    };
+    loadSponsors();
+  }, []);
+
+  const filteredSponsors = useMemo(() => {
+    const query = sponsorSearch.trim().toLowerCase();
+    if (!query) return sponsors;
+    return sponsors.filter((sponsor) => [sponsor.firstName, sponsor.lastName, sponsor.email]
+      .some((value) => value.toLowerCase().includes(query)));
+  }, [sponsors, sponsorSearch]);
+
   const filteredDrivers = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return drivers;
@@ -45,23 +78,25 @@ export default function AdminDriversPage() {
     setNewDriver((current) => ({ ...current, [name]: value }));
   };
 
-  const createDriver = async (event) => {
+  const createUser = async (event) => {
     event.preventDefault();
+    const role = event.nativeEvent.submitter?.value || 'driver';
     setSaving(true);
     setError('');
     setNotice('');
     try {
-      const response = await fetch('/api/admin/drivers', {
+      const response = await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(newDriver),
+        body: JSON.stringify({ ...newDriver, role }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.message || 'Unable to create the driver.');
-      setDrivers((current) => [data.driver, ...current]);
+      if (!response.ok) throw new Error(data.message || 'Unable to create the user account.');
+      if (data.user.role === 'driver') setDrivers((current) => [data.user, ...current]);
+      if (data.user.role === 'sponsor') setSponsors((current) => [data.user, ...current]);
       setNewDriver(EMPTY_DRIVER);
-      setNotice('Driver account created.');
+      setNotice(`${role[0].toUpperCase()}${role.slice(1)} account created.`);
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -153,13 +188,97 @@ export default function AdminDriversPage() {
     }
   };
 
+  const beginSponsorEdit = (sponsor) => {
+    setResettingSponsorId(null);
+    setSponsorPassword('');
+    setConfirmSponsorPassword('');
+    setEditingSponsorId(sponsor.id);
+    setEditSponsor({ firstName: sponsor.firstName, lastName: sponsor.lastName, email: sponsor.email });
+    setError('');
+    setNotice('');
+  };
+
+  const saveSponsorEdit = async (event) => {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      const response = await fetch(`/api/admin/sponsors/${editingSponsorId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(editSponsor),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to update the sponsor.');
+      setSponsors((current) => current.map((sponsor) => sponsor.id === data.sponsor.id ? data.sponsor : sponsor));
+      setEditingSponsorId(null);
+      setEditSponsor(null);
+      setNotice('Sponsor account updated.');
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteSponsor = async (sponsor) => {
+    if (!window.confirm(`Delete ${sponsor.firstName} ${sponsor.lastName}'s account? This cannot be undone.`)) return;
+    setSaving(true);
+    setError('');
+    setNotice('');
+    try {
+      const response = await fetch(`/api/admin/sponsors/${sponsor.id}`, { method: 'DELETE', credentials: 'include' });
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.message || 'Unable to delete the sponsor.');
+      }
+      setSponsors((current) => current.filter((entry) => entry.id !== sponsor.id));
+      setNotice('Sponsor account deleted.');
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const resetSponsorPassword = async (event, sponsor) => {
+    event.preventDefault();
+    setError('');
+    setNotice('');
+    if (sponsorPassword !== confirmSponsorPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+    if (!window.confirm(`Reset ${sponsor.firstName} ${sponsor.lastName}'s password?`)) return;
+    setSaving(true);
+    try {
+      const response = await fetch(`/api/admin/sponsors/${sponsor.id}/password`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ password: sponsorPassword }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to reset the password.');
+      setResettingSponsorId(null);
+      setSponsorPassword('');
+      setConfirmSponsorPassword('');
+      setNotice(`Password reset for ${sponsor.firstName} ${sponsor.lastName}.`);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <main className="admin-drivers-page">
       <section className="admin-drivers-page__intro">
         <div>
           <p className="admin-home-page__eyebrow">Administration</p>
           <h1>Driver accounts</h1>
-          <p>Create and maintain driver accounts. Administrative users are not shown here.</p>
+          <p>Create driver, admin, and sponsor accounts. The lists below show drivers and sponsor users.</p>
         </div>
         <p className="admin-drivers-page__count">{drivers.length} driver{drivers.length === 1 ? '' : 's'}</p>
       </section>
@@ -168,13 +287,15 @@ export default function AdminDriversPage() {
       {notice && <p className="admin-drivers-page__message admin-drivers-page__message--success" role="status">{notice}</p>}
 
       <section className="admin-driver-create card">
-        <h2 className="card__title">Create driver account</h2>
-        <form className="admin-driver-form" onSubmit={createDriver}>
+        <h2 className="card__title">Create New User Account</h2>
+        <form className="admin-driver-form" onSubmit={createUser}>
           <label>First name<input name="firstName" value={newDriver.firstName} onChange={updateNewDriver} required /></label>
           <label>Last name<input name="lastName" value={newDriver.lastName} onChange={updateNewDriver} required /></label>
           <label>Email address<input type="email" name="email" value={newDriver.email} onChange={updateNewDriver} required /></label>
           <label>Temporary password<input type="password" name="password" value={newDriver.password} onChange={updateNewDriver} minLength="8" autoComplete="new-password" required /></label>
-          <button type="submit" disabled={saving}>{saving ? 'Saving...' : 'Create driver'}</button>
+          <button type="submit" value="driver" disabled={saving}>{saving ? 'Saving...' : 'Create Driver User'}</button>
+          <button type="submit" value="admin" disabled={saving}>{saving ? 'Saving...' : 'Create Admin User'}</button>
+          <button type="submit" value="sponsor" disabled={saving}>{saving ? 'Saving...' : 'Create Sponsor User'}</button>
         </form>
       </section>
 
@@ -212,6 +333,47 @@ export default function AdminDriversPage() {
                 </td></tr>
               ) : (
                 <tr key={driver.id}><td>{driver.firstName} {driver.lastName}</td><td>{driver.email}</td><td>{driver.createdAt ? new Date(driver.createdAt).toLocaleDateString() : '—'}</td><td className="admin-driver-table__actions"><button type="button" onClick={() => beginEdit(driver)} disabled={saving}>Edit</button><button type="button" disabled={saving} onClick={() => { setEditingId(null); setEditDriver(null); setResettingId(driver.id); setResetPassword(''); setConfirmPassword(''); setError(''); setNotice(''); }}>Reset password</button><button type="button" className="admin-driver-button--delete" onClick={() => deleteDriver(driver)} disabled={saving}>Delete</button></td></tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
+      </section>
+      <section className="admin-driver-list card" aria-labelledby="sponsor-list-title">
+        <div className="admin-driver-list__header">
+          <h2 className="card__title" id="sponsor-list-title">All sponsor users</h2>
+          <label className="admin-driver-list__search">Search sponsor users<input type="search" value={sponsorSearch} onChange={(event) => setSponsorSearch(event.target.value)} placeholder="Name or email" /></label>
+        </div>
+
+        {sponsorsLoading ? <p className="purchases-card__empty">Loading sponsor users...</p> : sponsorsError ? (
+          <p className="admin-drivers-page__message admin-drivers-page__message--error" role="alert">{sponsorsError}</p>
+        ) : filteredSponsors.length === 0 ? (
+          <p className="purchases-card__empty">No sponsor accounts match your search.</p>
+        ) : (
+          <div className="admin-driver-list__table-wrap">
+            <table className="admin-driver-table">
+              <thead><tr><th>Sponsor user</th><th>Email</th><th>Joined</th><th><span className="sr-only">Actions</span></th></tr></thead>
+              <tbody>{filteredSponsors.map((sponsor) => resettingSponsorId === sponsor.id ? (
+                <tr key={sponsor.id} className="admin-driver-table__edit-row"><td colSpan="4">
+                  <form className="admin-driver-edit" onSubmit={(event) => resetSponsorPassword(event, sponsor)}>
+                    <span>Reset password for {sponsor.firstName} {sponsor.lastName}</span>
+                    <label>New password<input type="password" value={sponsorPassword} onChange={(event) => setSponsorPassword(event.target.value)} minLength="8" autoComplete="new-password" disabled={saving} required autoFocus /></label>
+                    <label>Confirm password<input type="password" value={confirmSponsorPassword} onChange={(event) => setConfirmSponsorPassword(event.target.value)} minLength="8" autoComplete="new-password" disabled={saving} required /></label>
+                    <button type="submit" disabled={saving}>{saving ? 'Resetting...' : 'Reset password'}</button>
+                    <button type="button" className="admin-driver-button--secondary" disabled={saving} onClick={() => { setResettingSponsorId(null); setSponsorPassword(''); setConfirmSponsorPassword(''); }}>Cancel</button>
+                  </form>
+                </td></tr>
+              ) : editingSponsorId === sponsor.id ? (
+                <tr key={sponsor.id} className="admin-driver-table__edit-row"><td colSpan="4">
+                  <form className="admin-driver-edit" onSubmit={saveSponsorEdit}>
+                    <label>First name<input value={editSponsor.firstName} onChange={(event) => setEditSponsor((current) => ({ ...current, firstName: event.target.value }))} required /></label>
+                    <label>Last name<input value={editSponsor.lastName} onChange={(event) => setEditSponsor((current) => ({ ...current, lastName: event.target.value }))} required /></label>
+                    <label>Email<input type="email" value={editSponsor.email} onChange={(event) => setEditSponsor((current) => ({ ...current, email: event.target.value }))} required /></label>
+                    <button type="submit" disabled={saving}>Save</button>
+                    <button type="button" className="admin-driver-button--secondary" onClick={() => { setEditingSponsorId(null); setEditSponsor(null); }}>Cancel</button>
+                  </form>
+                </td></tr>
+              ) : (
+                <tr key={sponsor.id}><td>{sponsor.firstName} {sponsor.lastName}</td><td>{sponsor.email}</td><td>{sponsor.createdAt ? new Date(sponsor.createdAt).toLocaleDateString() : '—'}</td><td className="admin-driver-table__actions"><button type="button" onClick={() => beginSponsorEdit(sponsor)} disabled={saving}>Edit</button><button type="button" disabled={saving} onClick={() => { setEditingSponsorId(null); setEditSponsor(null); setResettingSponsorId(sponsor.id); setSponsorPassword(''); setConfirmSponsorPassword(''); setError(''); setNotice(''); }}>Reset password</button><button type="button" className="admin-driver-button--delete" onClick={() => deleteSponsor(sponsor)} disabled={saving}>Delete</button></td></tr>
               ))}</tbody>
             </table>
           </div>

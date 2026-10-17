@@ -7,10 +7,14 @@ export default function AboutPage() {
   useEffect(() => {
     fetch('/api/about')
       .then(async (response) => {
-        if (!response.headers.get('content-type')?.includes('application/json')) {
+        // The Lambda handler on AWS sends JSON without a JSON content-type, so
+        // judge the response by whether the body parses rather than by header.
+        let data;
+        try {
+          data = JSON.parse(await response.text());
+        } catch {
           throw new Error('Release details are unavailable. The About API returned an unexpected response.');
         }
-        const data = await response.json();
         if (!response.ok) throw new Error(data.message || data.error || 'Unable to load release details.');
         return data;
       })
