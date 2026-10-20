@@ -247,10 +247,16 @@ app.post('/api/auth/logout', (req, res) => {
 app.get('/api/admin/drivers', requireAdmin, async (req, res) => {
   try {
     const [rows] = await pool.execute(
-      `SELECT user_id, email, first_name, last_name, created_at
-       FROM users WHERE role = 'driver' ORDER BY created_at DESC, user_id DESC`,
+      `SELECT u.user_id, u.email, u.first_name, u.last_name, u.created_at,
+              GROUP_CONCAT(DISTINCT s.name ORDER BY s.name SEPARATOR ', ') AS affiliation
+       FROM users u
+       LEFT JOIN driver_applications a ON a.driver_user_id = u.user_id AND a.status = 'approved'
+       LEFT JOIN sponsors s ON s.sponsor_id = a.sponsor_id
+       WHERE u.role = 'driver'
+       GROUP BY u.user_id, u.email, u.first_name, u.last_name, u.created_at
+       ORDER BY u.created_at DESC, u.user_id DESC`,
     );
-    return res.json({ drivers: rows.map(adminDriver) });
+    return res.json({ drivers: rows.map((driver) => ({ ...adminDriver(driver), affiliation: driver.affiliation || null })) });
   } catch (error) {
     console.error('Driver list failed:', error.message);
     return res.status(500).json({ message: 'Unable to load driver accounts.' });
@@ -260,10 +266,14 @@ app.get('/api/admin/drivers', requireAdmin, async (req, res) => {
 app.get('/api/admin/sponsors', requireAdmin, async (req, res) => {
   try {
     const [rows] = await pool.execute(
-      `SELECT user_id, email, first_name, last_name, created_at
-       FROM users WHERE role = 'sponsor' ORDER BY created_at DESC, user_id DESC`,
+      `SELECT u.user_id, u.email, u.first_name, u.last_name, u.created_at,
+            s.name AS affiliation
+       FROM users u
+       LEFT JOIN sponsors s ON s.sponsor_id = u.sponsor_id
+       WHERE u.role = 'sponsor'
+       ORDER BY u.created_at DESC, u.user_id DESC`,
     );
-    return res.json({ sponsors: rows.map(adminDriver) });
+     return res.json({ sponsors: rows.map((sponsor) => ({ ...adminDriver(sponsor), affiliation: sponsor.affiliation || null })) });
   } catch (error) {
     console.error('Sponsor user list failed:', error.message);
     return res.status(500).json({ message: 'Unable to load sponsor accounts.' });
@@ -767,7 +777,7 @@ app.get('/api/driver', async (req, res) => {
     if (!users[0]) return res.status(401).json({ message: 'Session expired.' });
 
     const [sponsors] = await pool.execute(
-      `SELECT s.name
+      `SELECT s.sponsor_id AS id, s.name
        FROM driver_applications a
        JOIN sponsors s ON s.sponsor_id = a.sponsor_id
        WHERE a.driver_user_id = ? AND a.status = 'approved'
@@ -780,6 +790,7 @@ app.get('/api/driver', async (req, res) => {
       name: `${users[0].first_name} ${users[0].last_name}`.trim(),
       dateJoined: users[0].created_at,
       sponsorName: sponsors.map((sponsor) => sponsor.name).join(', '),
+      sponsors,
       points: 0,
       recentPurchases: [],
     });

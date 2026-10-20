@@ -2,16 +2,16 @@ import React from 'react';
 
 const DRIVER_LINKS = [
   { label: 'Dashboard', value: 'dashboard' },
+  { label: 'Catalog', value: 'catalog' },
   { label: 'Sponsors', value: 'sponsors' },
   { label: 'My Application', value: 'application' },
   { label: 'Point Management', value: 'points' },
-  { label: 'Account', value: 'account' },
   { label: 'About Page', value: 'about' },
 ];
 
 const ADMIN_LINKS = [
   { label: 'Admin Home', value: 'admin' },
-  { label: 'Drivers', value: 'drivers' },
+  { label: 'Users', value: 'drivers' },
   { label: 'Point Management', value: 'points' },
   { label: 'Sponsors', value: 'sponsors' },
   { label: 'About Page', value: 'about' },
@@ -21,7 +21,6 @@ const SPONSOR_LINKS = [
   { label: 'Dashboard', value: 'dashboard' },
   { label: 'Applications', value: 'sponsor-applications', showsPendingCount: true },
   { label: 'Point Management', value: 'points' },
-  { label: 'Account', value: 'account' },
   { label: 'About Page', value: 'about' },
 ];
 
@@ -53,13 +52,12 @@ export default function Navbar({ driverName, userRole, currentPage, pendingCount
             ))}
         </nav>
 
-        {previewRole ? (
+        {previewRole && (
           <div className="navbar__preview-controls">
             <span className="navbar__preview-label">Viewing as {driverName} · {previewRole} preview</span>
             <button className="navbar__preview-exit" type="button" onClick={onExitPreview}>Exit preview</button>
           </div>
-        ) : (
-          <>
+        )}
           <button
             type="button"
             className="navbar__user"
@@ -68,6 +66,8 @@ export default function Navbar({ driverName, userRole, currentPage, pendingCount
           >
             <span className="navbar__avatar" aria-hidden="true">{initials}</span>
           </button>
+        {!previewRole && (
+          <>
           <button className="navbar__logout" type="button" onClick={async () => {
             await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
             onLogout();

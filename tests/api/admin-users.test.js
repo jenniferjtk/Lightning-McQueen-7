@@ -57,11 +57,11 @@ it('restricts sponsor user listing to admins', async () => {
   }
 });
 
-it('lists sponsor users without exposing password hashes', async () => {
+it('lists sponsor users with affiliations without exposing password hashes', async () => {
   const agent = await signIn(app, users.admin);
-  mockQueries([roleLookup, ["WHERE role = 'sponsor' ORDER BY created_at DESC, user_id DESC", [users.sponsor]]]);
+  mockQueries([roleLookup, ['WHERE u.role = \'sponsor\'', [{ ...users.sponsor, affiliation: 'Acme Trucking' }]]]);
   const res = await agent.get('/api/admin/sponsors').expect(200);
-  expect(res.body.sponsors).toEqual([{ id: 2, email: 'sponsor@test.com', firstName: 'Sam', lastName: 'Sponsor' }]);
+  expect(res.body.sponsors).toEqual([{ id: 2, email: 'sponsor@test.com', firstName: 'Sam', lastName: 'Sponsor', createdAt: undefined, affiliation: 'Acme Trucking' }]);
 });
 
 it('requires an authenticated admin to create accounts', async () => {

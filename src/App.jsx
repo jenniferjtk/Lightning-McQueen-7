@@ -11,6 +11,7 @@ import MyApplicationPage from './components/MyApplicationPage.jsx';
 import AdminHomePage from './components/AdminHomePage.jsx';
 import AdminDriversPage from './components/AdminDriversPage.jsx';
 import SponsorApplicationsPage from './components/SponsorApplicationsPage.jsx';
+import CatalogPage from './components/CatalogPage.jsx';
 
 const emptyDriver = {
   name: '',
@@ -21,6 +22,7 @@ const emptyDriver = {
   balanceNotifications: [],
   recentPurchases: [],
   savedItems: [],
+  sponsors: [],
 };
 
 export default function App() {
@@ -33,6 +35,7 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState(() => {
     const pathname = window.location.pathname;
     if (pathname === '/about') return 'about';
+    if (pathname === '/catalog') return 'catalog';
     if (pathname === '/account') return 'account';
     if (pathname === '/points') return 'points';
     if (pathname === '/sponsors') return 'sponsors';
@@ -55,6 +58,7 @@ export default function App() {
     const pathMap = {
       dashboard: '/',
       about: '/about',
+      catalog: '/catalog',
       account: '/account',
       points: '/points',
       sponsors: '/sponsors',
@@ -158,6 +162,8 @@ export default function App() {
         <PointManagementPage user={previewUser} readOnly={isPreview} />
       ) : visiblePage === 'sponsors' ? (
         <SponsorsPage user={previewUser} readOnly={isPreview} />
+      ) : visiblePage === 'catalog' ? (
+        <CatalogPage sponsors={driver.sponsors} />
       ) : visiblePage === 'application' ? (
         <MyApplicationPage user={previewUser} preview={isPreview} />
       ) : (
