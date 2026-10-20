@@ -29,6 +29,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('purchases');
   const [pendingCount, setPendingCount] = useState(0);
   const [driverData, setDriverData] = useState(null);
+  const [previewRole, setPreviewRole] = useState(null);
   const [currentPage, setCurrentPage] = useState(() => {
     const pathname = window.location.pathname;
     if (pathname === '/about') return 'about';
@@ -98,6 +99,7 @@ export default function App() {
     setCurrentPage(authenticatedUser.role === 'admin' ? 'admin' : 'dashboard');
   }} />;
 
+  const previewUser = previewRole ? { ...user, role: previewRole } : user;
   const driver = { ...emptyDriver, ...driverData };
 
   const handleProfileUpdate = (updatedUser) => {
@@ -107,7 +109,11 @@ export default function App() {
   const adminPages = ['admin', 'drivers', 'user-log'];
   const isSponsor = user.role === 'sponsor';
   const sponsorPages = ['sponsor-applications'];
-  const visiblePage = (!isAdmin && adminPages.includes(currentPage)) || (!isSponsor && sponsorPages.includes(currentPage))
+  const isPreview = Boolean(previewRole);
+  const viewRole = previewRole || user.role;
+  const visiblePage = isPreview
+    ? previewRole === 'sponsor' && currentPage === 'dashboard' ? 'sponsor-applications' : currentPage
+    : (!isAdmin && adminPages.includes(currentPage)) || (!isSponsor && sponsorPages.includes(currentPage))
     ? 'dashboard'
     : currentPage;
 
@@ -115,32 +121,45 @@ export default function App() {
     <div className="app">
       <Navbar
         driverName={`${user.firstName} ${user.lastName}`}
-        userRole={user.role}
+        userRole={viewRole}
         currentPage={visiblePage}
         pendingCount={pendingCount}
+        previewRole={previewRole}
+        onExitPreview={() => {
+          setPreviewRole(null);
+          setCurrentPage('admin');
+        }}
         onPageChange={setCurrentPage}
         onLogout={() => {
           setUser(null);
+          setPreviewRole(null);
           setCurrentPage('dashboard');
         }}
       />
 
       {visiblePage === 'admin' ? (
-        <AdminHomePage user={user} onPageChange={setCurrentPage} />
+        <AdminHomePage
+          user={user}
+          onPageChange={setCurrentPage}
+          onPreviewRole={(role) => {
+            setPreviewRole(role);
+            setCurrentPage(role === 'driver' ? 'dashboard' : 'sponsor-applications');
+          }}
+        />
       ) : visiblePage === 'drivers' ? (
         <AdminDriversPage />
       ) : visiblePage === 'sponsor-applications' ? (
-        <SponsorApplicationsPage user={user} onPendingCountChange={handlePendingCountChange} />
+        <SponsorApplicationsPage user={previewUser} onPendingCountChange={handlePendingCountChange} preview={isPreview} />
       ) : visiblePage === 'about' ? (
         <AboutPage />
       ) : visiblePage === 'account' ? (
-        <AccountPage user={user} onProfileUpdate={handleProfileUpdate} />
+        <AccountPage user={user} roleOverride={previewRole || null} readOnly={isPreview} onProfileUpdate={handleProfileUpdate} />
       ) : visiblePage === 'points' ? (
-        <PointManagementPage user={user} />
+        <PointManagementPage user={previewUser} readOnly={isPreview} />
       ) : visiblePage === 'sponsors' ? (
-        <SponsorsPage user={user} />
+        <SponsorsPage user={previewUser} readOnly={isPreview} />
       ) : visiblePage === 'application' ? (
-        <MyApplicationPage user={user} />
+        <MyApplicationPage user={previewUser} preview={isPreview} />
       ) : (
         <main className="dashboard">
           <div className="dashboard__top">
@@ -170,10 +189,10 @@ export default function App() {
 
             <div className="dashboard__profile-column">
               <ProfileCard
-                name={driver.name || '—'}
-                dateJoined={driver.dateJoined || ''}
-                sponsorName={driver.sponsorName || '—'}
-                sponsor={driver.sponsor}
+                name={isPreview ? `${user.firstName} ${user.lastName}`.trim() : driver.name || '—'}
+                dateJoined={isPreview ? user.createdAt || '' : driver.dateJoined || ''}
+                sponsorName={isPreview ? user.sponsorId ? 'Linked sponsor account' : '—' : driver.sponsorName || '—'}
+                sponsor={isPreview ? null : driver.sponsor}
               />
 
               <section className="card balance-notifications-card">
@@ -218,6 +237,7 @@ export default function App() {
               </button>
             </div>
 
+            {isPreview && <p className="dashboard-preview-note">Your administrator details are displayed in the driver portal. No records can be changed in preview.</p>}
             {activeTab === 'purchases' ? (
               <PurchasesTable purchases={driver.recentPurchases} />
             ) : (

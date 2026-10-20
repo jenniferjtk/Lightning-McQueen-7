@@ -561,6 +561,12 @@ body {
 .auth-form__error { color: #a2382b; font-size: 0.85rem; margin: 0; }
 .navbar__logout { border: 1px solid #667382; border-radius: 4px; background: transparent; color: #d8d3c6; cursor: pointer; font: inherit; font-size: 0.82rem; padding: 0.4rem 0.65rem; }
 .navbar__logout:hover { border-color: #fff; color: #fff; }
+.navbar__preview-controls { align-items: center; display: flex; gap: 0.9rem; margin-left: auto; }
+.navbar__preview-label { color: #f2bd69; font-size: 0.84rem; font-weight: 700; }
+.navbar__preview-exit { background: transparent; border: 1px solid #8994a0; border-radius: 4px; color: #fff; cursor: pointer; font: inherit; font-size: 0.82rem; padding: 0.45rem 0.7rem; }
+.navbar__preview-exit:hover, .navbar__preview-exit:focus-visible { border-color: #fff; }
+.account-preview-note, .dashboard-preview-note { background: #eef4f8; border-left: 4px solid var(--color-steel); color: #324b5d; margin: 0 0 1rem; padding: 0.85rem 1rem; }
+.dashboard-preview-note { margin-top: 0; }
 
 .admin-home-page {
   max-width: 960px;
@@ -609,6 +615,24 @@ body {
 .admin-action-card > p:not(.admin-action-card__label) { color: var(--color-slate); line-height: 1.5; margin: 0.75rem 0 1.5rem; }
 .admin-action-card button { background: var(--color-asphalt); border: 0; border-radius: 5px; color: #fff; cursor: pointer; font: inherit; font-weight: 700; margin-top: auto; padding: 0.7rem 0.8rem; text-align: left; }
 .admin-action-card button:hover, .admin-action-card button:focus-visible { background: var(--color-steel); }
+
+.admin-view-preview {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--color-line);
+  border-left: 4px solid var(--color-steel);
+  display: flex;
+  gap: 2rem;
+  justify-content: space-between;
+  margin-top: 2rem;
+  padding: 1.5rem;
+}
+
+.admin-view-preview h2 { font-size: 1.2rem; margin: 0; }
+.admin-view-preview p:not(.admin-home-page__eyebrow) { color: var(--color-slate); margin: 0.5rem 0 0; }
+.admin-view-preview__actions { display: flex; flex-wrap: wrap; gap: 0.65rem; }
+.admin-view-preview__actions button { background: var(--color-asphalt); border: 0; border-radius: 4px; color: #fff; cursor: pointer; font: inherit; font-size: 0.85rem; font-weight: 700; padding: 0.7rem 0.85rem; }
+.admin-view-preview__actions button:hover, .admin-view-preview__actions button:focus-visible { background: var(--color-steel); }
 
 .admin-drivers-page { max-width: 1100px; margin: 0 auto; padding: 3rem 1.5rem 4rem; }
 .admin-drivers-page__intro { align-items: end; display: flex; gap: 1rem; justify-content: space-between; margin-bottom: 2rem; }
@@ -1155,6 +1179,10 @@ body {
 
   .navbar__logout { margin-left: auto; }
 
+  .navbar__preview-controls { margin-left: auto; }
+
+  .admin-view-preview { align-items: flex-start; flex-direction: column; gap: 1rem; }
+
   .edit-account-form__row {
     grid-template-columns: 1fr;
   }
@@ -1318,6 +1346,18 @@ body {
 .sponsor-card__apply:disabled {
   cursor: wait;
   opacity: 0.7;
+}
+
+.sponsor-card__read-only {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  color: var(--color-slate);
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 0.7rem 1rem;
+  text-align: center;
 }
 
 .sponsor-card__message {

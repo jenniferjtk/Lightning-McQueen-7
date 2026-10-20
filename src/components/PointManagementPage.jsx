@@ -10,14 +10,14 @@ const createRow = (id) => ({
   isEditing: true,
 });
 
-export default function PointManagementPage({ user }) {
+export default function PointManagementPage({ user, readOnly = false }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [message, setMessage] = useState('');
   const [savingId, setSavingId] = useState(null);
   const [nextLocalId, setNextLocalId] = useState(1);
-  const canManage = user?.role === 'admin' || user?.role === 'sponsor';
+  const canManage = !readOnly && (user?.role === 'admin' || user?.role === 'sponsor');
 
   useEffect(() => {
     fetch('/api/sponsor-rules', { credentials: 'include' })
@@ -100,9 +100,9 @@ export default function PointManagementPage({ user }) {
   return (
     <main className="point-management-page">
       <section className="point-management-page__intro">
-        <p className="point-management-page__eyebrow">Point management</p>
-        <h1>Add or remove points.</h1>
-        <p>Record the reason for each point adjustment and choose whether it happens once or repeats.</p>
+        <p className="point-management-page__eyebrow">{readOnly ? 'Preview point management' : 'Point management'}</p>
+        <h1>{readOnly ? 'Point rules preview.' : 'Add or remove points.'}</h1>
+        <p>{readOnly ? 'The authenticated administrator is viewing these rules without making changes.' : 'Record the reason for each point adjustment and choose whether it happens once or repeats.'}</p>
       </section>
 
       <section className="point-entry" aria-label="Sponsor point rules">

@@ -15,7 +15,7 @@ function formatDate(dateStr) {
   });
 }
 
-export default function SponsorApplicationsPage({ user, onPendingCountChange }) {
+export default function SponsorApplicationsPage({ user, onPendingCountChange, preview = false }) {
   const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -24,20 +24,31 @@ export default function SponsorApplicationsPage({ user, onPendingCountChange }) 
   const [decideError, setDecideError] = useState('');
 
   useEffect(() => {
+    if (preview) {
+      fetch('/api/admin/sponsor-applications')
+        .then((response) => response.ok ? response.json() : Promise.reject(new Error('Unable to load applications.')))
+        .then((data) => setApplications(data.applications || []))
+        .catch((error) => setLoadError(error.message))
+        .finally(() => setLoading(false));
+      return undefined;
+    }
     fetch('/api/applications')
       .then((response) => response.ok ? response.json() : Promise.reject(new Error('Unable to load applications.')))
       .then(setApplications)
       .catch((error) => setLoadError(error.message))
       .finally(() => setLoading(false));
-  }, [user.sponsorId]);
+    return undefined;
+  }, [preview, user.sponsorId]);
 
   useEffect(() => {
+    if (preview) return;
     if (!loading && !loadError) {
       onPendingCountChange(applications.filter((application) => application.status === 'pending').length);
     }
-  }, [applications, loading, loadError, onPendingCountChange]);
+  }, [applications, loading, loadError, onPendingCountChange, preview]);
 
   const decide = async (applicationId, decision) => {
+    if (preview) return;
     setDecidingId(applicationId);
     setDecideError('');
     try {
@@ -68,8 +79,8 @@ export default function SponsorApplicationsPage({ user, onPendingCountChange }) 
     <main className="applications-page">
       <section className="applications-page__intro">
         <p className="applications-page__eyebrow">Applications</p>
-        <h1>Review driver applications.</h1>
-        <p>See who has applied to your program, and approve or reject pending applications.</p>
+        <h1>{preview ? 'Sponsor applications preview.' : 'Review driver applications.'}</h1>
+        <p>{preview ? 'The authenticated administrator is viewing real application records. Changes are disabled in preview.' : 'See who has applied to your program, and approve or reject pending applications.'}</p>
       </section>
 
       {loading ? (
@@ -122,22 +133,22 @@ export default function SponsorApplicationsPage({ user, onPendingCountChange }) 
                     <td>
                       {application.status === 'pending' && (
                         <div className="applications-table__actions">
-                          <button
+                          {!preview && <button
                             type="button"
                             className="applications-table__decide applications-table__decide--approve"
                             disabled={decidingId === application.application_id}
                             onClick={() => decide(application.application_id, 'approved')}
                           >
                             Approve
-                          </button>
-                          <button
+                          </button>}
+                          {!preview && <button
                             type="button"
                             className="applications-table__decide applications-table__decide--reject"
                             disabled={decidingId === application.application_id}
                             onClick={() => decide(application.application_id, 'rejected')}
                           >
                             Reject
-                          </button>
+                          </button>}
                         </div>
                       )}
                     </td>

@@ -62,6 +62,7 @@ const publicUser = (user) => ({
   firstName: user.first_name,
   lastName: user.last_name,
   sponsorId: user.sponsor_id ?? null,
+  createdAt: user.created_at,
 });
 
 const adminDriver = (user) => ({
@@ -266,6 +267,24 @@ app.get('/api/admin/sponsors', requireAdmin, async (req, res) => {
   } catch (error) {
     console.error('Sponsor user list failed:', error.message);
     return res.status(500).json({ message: 'Unable to load sponsor accounts.' });
+  }
+});
+
+app.get('/api/admin/sponsor-applications', requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT a.application_id, a.status, a.submitted_at, a.decided_at,
+              u.user_id AS driver_user_id, u.first_name, u.last_name, u.email,
+              s.sponsor_id, s.name AS sponsor_name
+       FROM driver_applications a
+       JOIN users u ON u.user_id = a.driver_user_id
+       JOIN sponsors s ON s.sponsor_id = a.sponsor_id
+       ORDER BY a.submitted_at DESC`,
+    );
+    return res.json({ applications: rows });
+  } catch (error) {
+    console.error('Admin sponsor application lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load sponsor applications.' });
   }
 });
 
