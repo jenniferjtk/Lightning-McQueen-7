@@ -19,6 +19,7 @@ const ADMIN_LINKS = [
 
 const SPONSOR_LINKS = [
   { label: 'Dashboard', value: 'dashboard' },
+  { label: 'Driver Management', value: 'sponsor-drivers' },
   { label: 'Applications', value: 'sponsor-applications', showsPendingCount: true },
   { label: 'Point Management', value: 'points' },
   { label: 'About Page', value: 'about' },

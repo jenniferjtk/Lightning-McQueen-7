@@ -10,6 +10,7 @@ import SponsorsPage from './components/SponsorsPage.jsx';
 import MyApplicationPage from './components/MyApplicationPage.jsx';
 import AdminHomePage from './components/AdminHomePage.jsx';
 import AdminDriversPage from './components/AdminDriversPage.jsx';
+import SponsorConversionCard from './components/SponsorConversionCard.jsx';
 import SponsorApplicationsPage from './components/SponsorApplicationsPage.jsx';
 import CatalogPage from './components/CatalogPage.jsx';
 
@@ -43,6 +44,7 @@ export default function App() {
     if (pathname === '/admin') return 'admin';
     if (pathname === '/admin/drivers') return 'drivers';
     if (pathname === '/sponsor/applications') return 'sponsor-applications';
+    if (pathname === '/sponsor/drivers') return 'sponsor-drivers';
     return 'dashboard';
   });
 
@@ -66,6 +68,7 @@ export default function App() {
       admin: '/admin',
       drivers: '/admin/drivers',
       'sponsor-applications': '/sponsor/applications',
+      'sponsor-drivers': '/sponsor/drivers',
     };
     const path = pathMap[currentPage] || '/';
     window.history.pushState({}, '', path);
@@ -171,6 +174,7 @@ export default function App() {
           <div className="dashboard__top">
             <div className="dashboard__points-column">
               <PointsCard points={driver.points} />
+              <SponsorConversionCard userRole={user.role} />
               <section className="card points-activity-card">
                 <h2 className="card__title">Recent point updates</h2>
                 {driver.balanceNotifications.length === 0 ? (
@@ -224,6 +228,16 @@ export default function App() {
               </section>
             </div>
           </div>
+
+          {user.role === 'driver' && (
+            <section className="dashboard__charts" aria-label="Point history">
+              <PointsGainedChart />
+              <PointsLostChart />
+              <div className="dashboard__charts-wide">
+                <PointsTrendChart />
+              </div>
+            </section>
+          )}
 
           <section className="dashboard__panel">
             <div className="dashboard__tabs" aria-label="Dashboard sections">

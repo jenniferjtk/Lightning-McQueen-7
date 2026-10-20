@@ -75,6 +75,8 @@ on AWS, where logins are stored in MySQL instead of memory.
 
 `backend/db/seeds/sponsor_review_test_data.sql` adds a test sponsor and a test
 driver; see the comments at the top of that file for the logins.
+`backend/db/seeds/point_history_demo_data.sql` (run after it) gives that test
+driver a few weeks of demo point history for the dashboard charts.
 
 ## Deploy to AWS
 
