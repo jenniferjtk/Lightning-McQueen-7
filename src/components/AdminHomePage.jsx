@@ -115,6 +115,8 @@ export default function AdminHomePage({ user, onPageChange, onPreviewRole }) {
         </article>
       </section>
 
+      <SponsorAccountLinks />
+
       <section className="admin-view-preview" aria-labelledby="admin-view-preview-title">
         <div>
           <p className="admin-home-page__eyebrow">Preview portal</p>
