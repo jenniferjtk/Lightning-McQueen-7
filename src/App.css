@@ -1764,3 +1764,80 @@ body {
   cursor: wait;
   opacity: 0.7;
 }
+
+.sponsor-catalog__browse {
+  margin-top: 1.5rem;
+}
+
+.sponsor-catalog__notice {
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--color-line);
+  border-left: 3px solid var(--color-steel);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--color-ink);
+  font-size: 0.9rem;
+}
+
+.sponsor-catalog__notice--error {
+  border-left-color: #a2382b;
+}
+
+.sponsor-catalog__table td {
+  padding-right: 0.75rem;
+  vertical-align: middle;
+}
+
+.sponsor-catalog__product {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.sponsor-catalog__product img {
+  flex: none;
+  width: 2.5rem;
+  height: 2.5rem;
+  object-fit: contain;
+  background: #fff;
+}
+
+.sponsor-catalog__tag {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.sponsor-catalog__tag input {
+  min-width: 8rem;
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  padding: 0.4rem 0.55rem;
+  color: var(--color-asphalt);
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.sponsor-catalog__tag button {
+  border: 0;
+  border-radius: 4px;
+  background: var(--color-asphalt);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 0.4rem 0.65rem;
+}
+
+.sponsor-catalog__tag button:disabled,
+.sponsor-catalog__table .driver-management__view-application:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.sponsor-catalog__in-catalog {
+  color: var(--color-slate);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
