@@ -128,7 +128,7 @@ const requireLinkedSponsor = async (req, res, next) => {
     const [rows] = await pool.execute(
       `SELECT s.sponsor_id, s.name
        FROM users u
-       JOIN sponsors s ON s.sponsor_user_id = u.user_id
+       JOIN sponsors s ON s.sponsor_id = u.sponsor_id
        WHERE u.user_id = ? AND u.role = 'sponsor'`,
       [req.session.userId],
     );
@@ -284,15 +284,9 @@ app.get('/api/admin/drivers', requireAdmin, async (req, res) => {
 
 app.get('/api/admin/sponsor-links', requireAdmin, async (req, res) => {
   try {
-    const [sponsors] = await pool.execute(
-      `SELECT s.sponsor_id, s.name, s.sponsor_user_id,
-              u.email AS sponsor_user_email
-       FROM sponsors s
-       LEFT JOIN users u ON u.user_id = s.sponsor_user_id
-       ORDER BY s.name`,
-    );
+    const [sponsors] = await pool.execute('SELECT sponsor_id, name FROM sponsors ORDER BY name');
     const [sponsorUsers] = await pool.execute(
-      `SELECT user_id, email, first_name, last_name
+      `SELECT user_id, email, first_name, last_name, sponsor_id
        FROM users WHERE role = 'sponsor'
        ORDER BY last_name, first_name, user_id`,
     );
@@ -303,30 +297,30 @@ app.get('/api/admin/sponsor-links', requireAdmin, async (req, res) => {
   }
 });
 
-app.put('/api/admin/sponsor-links/:sponsorId', requireAdmin, async (req, res) => {
-  const sponsorId = Number(req.params.sponsorId);
-  const sponsorUserId = req.body?.sponsorUserId === null || req.body?.sponsorUserId === ''
+// Links a sponsor login to the organization it acts for (users.sponsor_id).
+app.put('/api/admin/sponsor-links/:userId', requireAdmin, async (req, res) => {
+  const userId = Number(req.params.userId);
+  const sponsorId = req.body?.sponsorId === null || req.body?.sponsorId === ''
     ? null
-    : Number(req.body?.sponsorUserId);
-  if (!Number.isSafeInteger(sponsorId) || sponsorId < 1) {
-    return res.status(400).json({ message: 'Invalid sponsor organization.' });
+    : Number(req.body?.sponsorId);
+  if (!Number.isSafeInteger(userId) || userId < 1) {
+    return res.status(400).json({ message: 'Invalid sponsor account.' });
   }
-  if (sponsorUserId !== null && (!Number.isSafeInteger(sponsorUserId) || sponsorUserId < 1)) {
-    return res.status(400).json({ message: 'Choose a valid sponsor account.' });
+  if (sponsorId !== null && (!Number.isSafeInteger(sponsorId) || sponsorId < 1)) {
+    return res.status(400).json({ message: 'Choose a valid sponsor organization.' });
   }
   try {
-    const [sponsors] = await pool.execute('SELECT sponsor_id FROM sponsors WHERE sponsor_id = ?', [sponsorId]);
-    if (!sponsors[0]) return res.status(404).json({ message: 'Sponsor organization not found.' });
-    if (sponsorUserId !== null) {
-      const [users] = await pool.execute("SELECT user_id FROM users WHERE user_id = ? AND role = 'sponsor'", [sponsorUserId]);
-      if (!users[0]) return res.status(400).json({ message: 'Choose a sponsor account.' });
+    if (sponsorId !== null) {
+      const [sponsors] = await pool.execute('SELECT sponsor_id FROM sponsors WHERE sponsor_id = ?', [sponsorId]);
+      if (!sponsors[0]) return res.status(404).json({ message: 'Sponsor organization not found.' });
     }
-    await pool.execute('UPDATE sponsors SET sponsor_user_id = ? WHERE sponsor_id = ?', [sponsorUserId, sponsorId]);
+    const [result] = await pool.execute(
+      "UPDATE users SET sponsor_id = ? WHERE user_id = ? AND role = 'sponsor'",
+      [sponsorId, userId],
+    );
+    if (!result.affectedRows) return res.status(404).json({ message: 'Sponsor account not found.' });
     return res.json({ message: 'Sponsor account link saved.' });
   } catch (error) {
-    if (error.code === 'ER_DUP_ENTRY') {
-      return res.status(409).json({ message: 'That sponsor account is already linked to another organization.' });
-    }
     console.error('Sponsor account link update failed:', error.message);
     return res.status(500).json({ message: 'Unable to save the sponsor account link.' });
   }

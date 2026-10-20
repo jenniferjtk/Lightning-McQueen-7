@@ -19,28 +19,28 @@ function SponsorAccountLinks() {
       .then((data) => {
         setSponsors(data.sponsors);
         setSponsorUsers(data.sponsorUsers);
-        setSelections(Object.fromEntries(data.sponsors.map((sponsor) => [sponsor.sponsor_id, sponsor.sponsor_user_id || ''])));
+        setSelections(Object.fromEntries(data.sponsorUsers.map((account) => [account.user_id, account.sponsor_id ?? ''])));
       })
       .catch((requestError) => setError(requestError.message))
       .finally(() => setLoading(false));
   }, []);
 
-  const saveLink = async (sponsorId) => {
-    setSavingId(sponsorId);
+  const saveLink = async (userId) => {
+    setSavingId(userId);
     setError('');
     setMessage('');
     try {
-      const response = await fetch(`/api/admin/sponsor-links/${sponsorId}`, {
+      const response = await fetch(`/api/admin/sponsor-links/${userId}`, {
         method: 'PUT',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sponsorUserId: selections[sponsorId] || null }),
+        body: JSON.stringify({ sponsorId: selections[userId] || null }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Unable to save sponsor account link.');
-      setSponsors((current) => current.map((sponsor) => sponsor.sponsor_id === sponsorId
-        ? { ...sponsor, sponsor_user_id: selections[sponsorId] || null }
-        : sponsor));
+      setSponsorUsers((current) => current.map((account) => account.user_id === userId
+        ? { ...account, sponsor_id: selections[userId] || null }
+        : account));
       setMessage(data.message);
     } catch (requestError) {
       setError(requestError.message);
@@ -48,10 +48,6 @@ function SponsorAccountLinks() {
       setSavingId(null);
     }
   };
-
-  const claimedElsewhere = (accountId, sponsorId) => sponsors.some((sponsor) => (
-    sponsor.sponsor_id !== sponsorId && String(sponsor.sponsor_user_id) === String(accountId)
-  ));
 
   return (
     <section className="card admin-sponsor-links" aria-labelledby="sponsor-links-title">
@@ -61,39 +57,36 @@ function SponsorAccountLinks() {
           <p>Link each sponsor login to the organization it manages.</p>
         </div>
       </div>
-      {loading ? <p className="admin-sponsor-links__state">Loading sponsor organizations...</p> : sponsors.length === 0 ? (
-        <p className="admin-sponsor-links__state">No sponsor organizations are configured.</p>
-      ) : sponsorUsers.length === 0 ? (
+      {loading ? <p className="admin-sponsor-links__state">Loading sponsor accounts...</p> : sponsorUsers.length === 0 ? (
         <p className="admin-sponsor-links__state">No sponsor accounts are available to link.</p>
+      ) : sponsors.length === 0 ? (
+        <p className="admin-sponsor-links__state">No sponsor organizations are configured.</p>
       ) : (
         <div className="admin-sponsor-links__rows">
-          {sponsors.map((sponsor) => (
-            <div className="admin-sponsor-links__row" key={sponsor.sponsor_id}>
-              <strong>{sponsor.name}</strong>
-              <label>
-                <span className="sr-only">Account for {sponsor.name}</span>
-                <select
-                  value={selections[sponsor.sponsor_id]}
-                  onChange={(event) => setSelections((current) => ({ ...current, [sponsor.sponsor_id]: event.target.value }))}
-                  disabled={savingId !== null}
-                >
-                  <option value="">No account linked</option>
-                  {sponsorUsers.map((account) => (
-                    <option
-                      key={account.user_id}
-                      value={account.user_id}
-                      disabled={claimedElsewhere(account.user_id, sponsor.sponsor_id)}
-                    >
-                      {account.first_name} {account.last_name} · {account.email}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button type="button" onClick={() => saveLink(sponsor.sponsor_id)} disabled={savingId !== null}>
-                {savingId === sponsor.sponsor_id ? 'Saving...' : 'Save link'}
-              </button>
-            </div>
-          ))}
+          {sponsorUsers.map((account) => {
+            const accountName = `${account.first_name} ${account.last_name}`;
+            return (
+              <div className="admin-sponsor-links__row" key={account.user_id}>
+                <strong>{accountName} · {account.email}</strong>
+                <label>
+                  <span className="sr-only">Organization for {accountName}</span>
+                  <select
+                    value={selections[account.user_id]}
+                    onChange={(event) => setSelections((current) => ({ ...current, [account.user_id]: event.target.value }))}
+                    disabled={savingId !== null}
+                  >
+                    <option value="">No organization linked</option>
+                    {sponsors.map((sponsor) => (
+                      <option key={sponsor.sponsor_id} value={sponsor.sponsor_id}>{sponsor.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <button type="button" onClick={() => saveLink(account.user_id)} disabled={savingId !== null}>
+                  {savingId === account.user_id ? 'Saving...' : 'Save link'}
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
       {error && <p className="admin-sponsor-links__state admin-sponsor-links__state--error" role="alert">{error}</p>}
