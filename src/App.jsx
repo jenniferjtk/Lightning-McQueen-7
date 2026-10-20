@@ -12,6 +12,8 @@ import AdminHomePage from './components/AdminHomePage.jsx';
 import AdminDriversPage from './components/AdminDriversPage.jsx';
 import SponsorConversionCard from './components/SponsorConversionCard.jsx';
 import SponsorApplicationsPage from './components/SponsorApplicationsPage.jsx';
+import SponsorDriversPage from './components/SponsorDriversPage.jsx';
+import SponsorCatalogPage from './components/SponsorCatalogPage.jsx';
 import CatalogPage from './components/CatalogPage.jsx';
 import { PointsGainedChart, PointsLostChart, PointsTrendChart } from './components/PointCharts.jsx';
 
@@ -118,7 +120,7 @@ export default function App() {
   const isAdmin = user.role === 'admin';
   const adminPages = ['admin', 'drivers', 'user-log'];
   const isSponsor = user.role === 'sponsor';
-  const sponsorPages = ['sponsor-applications'];
+  const sponsorPages = ['sponsor-applications', 'sponsor-drivers', 'sponsor-catalog'];
   const isPreview = Boolean(previewRole);
   const viewRole = previewRole || user.role;
   const visiblePage = isPreview
@@ -160,6 +162,10 @@ export default function App() {
         <AdminDriversPage />
       ) : visiblePage === 'sponsor-applications' ? (
         <SponsorApplicationsPage user={previewUser} onPendingCountChange={handlePendingCountChange} preview={isPreview} />
+      ) : visiblePage === 'sponsor-drivers' ? (
+        <SponsorDriversPage user={previewUser} />
+      ) : visiblePage === 'sponsor-catalog' ? (
+        <SponsorCatalogPage user={previewUser} />
       ) : visiblePage === 'about' ? (
         <AboutPage />
       ) : visiblePage === 'account' ? (
