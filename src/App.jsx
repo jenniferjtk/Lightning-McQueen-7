@@ -12,9 +12,7 @@ import AdminHomePage from './components/AdminHomePage.jsx';
 import AdminDriversPage from './components/AdminDriversPage.jsx';
 import SponsorConversionCard from './components/SponsorConversionCard.jsx';
 import SponsorApplicationsPage from './components/SponsorApplicationsPage.jsx';
-import SponsorDriversPage from './components/SponsorDriversPage.jsx';
-import SponsorCatalogPage from './components/SponsorCatalogPage.jsx';
-import { PointsGainedChart, PointsLostChart, PointsTrendChart } from './components/PointCharts.jsx';
+import CatalogPage from './components/CatalogPage.jsx';
 
 const emptyDriver = {
   name: '',
@@ -25,6 +23,7 @@ const emptyDriver = {
   balanceNotifications: [],
   recentPurchases: [],
   savedItems: [],
+  sponsors: [],
 };
 
 export default function App() {
@@ -33,9 +32,11 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('purchases');
   const [pendingCount, setPendingCount] = useState(0);
   const [driverData, setDriverData] = useState(null);
+  const [previewRole, setPreviewRole] = useState(null);
   const [currentPage, setCurrentPage] = useState(() => {
     const pathname = window.location.pathname;
     if (pathname === '/about') return 'about';
+    if (pathname === '/catalog') return 'catalog';
     if (pathname === '/account') return 'account';
     if (pathname === '/points') return 'points';
     if (pathname === '/sponsors') return 'sponsors';
@@ -60,6 +61,7 @@ export default function App() {
     const pathMap = {
       dashboard: '/',
       about: '/about',
+      catalog: '/catalog',
       account: '/account',
       points: '/points',
       sponsors: '/sponsors',
@@ -106,6 +108,7 @@ export default function App() {
     setCurrentPage(authenticatedUser.role === 'admin' ? 'admin' : 'dashboard');
   }} />;
 
+  const previewUser = previewRole ? { ...user, role: previewRole } : user;
   const driver = { ...emptyDriver, ...driverData };
 
   const handleProfileUpdate = (updatedUser) => {
@@ -114,8 +117,12 @@ export default function App() {
   const isAdmin = user.role === 'admin';
   const adminPages = ['admin', 'drivers', 'user-log'];
   const isSponsor = user.role === 'sponsor';
-  const sponsorPages = ['sponsor-applications', 'sponsor-drivers', 'sponsor-catalog'];
-  const visiblePage = (!isAdmin && adminPages.includes(currentPage)) || (!isSponsor && sponsorPages.includes(currentPage))
+  const sponsorPages = ['sponsor-applications'];
+  const isPreview = Boolean(previewRole);
+  const viewRole = previewRole || user.role;
+  const visiblePage = isPreview
+    ? previewRole === 'sponsor' && currentPage === 'dashboard' ? 'sponsor-applications' : currentPage
+    : (!isAdmin && adminPages.includes(currentPage)) || (!isSponsor && sponsorPages.includes(currentPage))
     ? 'dashboard'
     : currentPage;
 
@@ -123,36 +130,47 @@ export default function App() {
     <div className="app">
       <Navbar
         driverName={`${user.firstName} ${user.lastName}`}
-        userRole={user.role}
+        userRole={viewRole}
         currentPage={visiblePage}
         pendingCount={pendingCount}
+        previewRole={previewRole}
+        onExitPreview={() => {
+          setPreviewRole(null);
+          setCurrentPage('admin');
+        }}
         onPageChange={setCurrentPage}
         onLogout={() => {
           setUser(null);
+          setPreviewRole(null);
           setCurrentPage('dashboard');
         }}
       />
 
       {visiblePage === 'admin' ? (
-        <AdminHomePage user={user} onPageChange={setCurrentPage} />
+        <AdminHomePage
+          user={user}
+          onPageChange={setCurrentPage}
+          onPreviewRole={(role) => {
+            setPreviewRole(role);
+            setCurrentPage(role === 'driver' ? 'dashboard' : 'sponsor-applications');
+          }}
+        />
       ) : visiblePage === 'drivers' ? (
         <AdminDriversPage />
       ) : visiblePage === 'sponsor-applications' ? (
-        <SponsorApplicationsPage user={user} onPendingCountChange={handlePendingCountChange} />
-      ) : visiblePage === 'sponsor-drivers' ? (
-        <SponsorDriversPage user={user} />
-      ) : visiblePage === 'sponsor-catalog' ? (
-        <SponsorCatalogPage user={user} />
+        <SponsorApplicationsPage user={previewUser} onPendingCountChange={handlePendingCountChange} preview={isPreview} />
       ) : visiblePage === 'about' ? (
         <AboutPage />
       ) : visiblePage === 'account' ? (
-        <AccountPage user={user} onProfileUpdate={handleProfileUpdate} />
+        <AccountPage user={user} roleOverride={previewRole || null} readOnly={isPreview} onProfileUpdate={handleProfileUpdate} />
       ) : visiblePage === 'points' ? (
-        <PointManagementPage user={user} />
+        <PointManagementPage user={previewUser} readOnly={isPreview} />
       ) : visiblePage === 'sponsors' ? (
-        <SponsorsPage user={user} />
+        <SponsorsPage user={previewUser} readOnly={isPreview} />
+      ) : visiblePage === 'catalog' ? (
+        <CatalogPage sponsors={driver.sponsors} />
       ) : visiblePage === 'application' ? (
-        <MyApplicationPage user={user} />
+        <MyApplicationPage user={previewUser} preview={isPreview} />
       ) : (
         <main className="dashboard">
           <div className="dashboard__top">
@@ -183,10 +201,10 @@ export default function App() {
 
             <div className="dashboard__profile-column">
               <ProfileCard
-                name={driver.name || '—'}
-                dateJoined={driver.dateJoined || ''}
-                sponsorName={driver.sponsorName || '—'}
-                sponsor={driver.sponsor}
+                name={isPreview ? `${user.firstName} ${user.lastName}`.trim() : driver.name || '—'}
+                dateJoined={isPreview ? user.createdAt || '' : driver.dateJoined || ''}
+                sponsorName={isPreview ? user.sponsorId ? 'Linked sponsor account' : '—' : driver.sponsorName || '—'}
+                sponsor={isPreview ? null : driver.sponsor}
               />
 
               <section className="card balance-notifications-card">
@@ -241,6 +259,7 @@ export default function App() {
               </button>
             </div>
 
+            {isPreview && <p className="dashboard-preview-note">Your administrator details are displayed in the driver portal. No records can be changed in preview.</p>}
             {activeTab === 'purchases' ? (
               <PurchasesTable purchases={driver.recentPurchases} />
             ) : (

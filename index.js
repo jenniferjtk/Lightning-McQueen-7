@@ -63,6 +63,7 @@ const publicUser = (user) => ({
   firstName: user.first_name,
   lastName: user.last_name,
   sponsorId: user.sponsor_id ?? null,
+  createdAt: user.created_at,
 });
 
 const adminDriver = (user) => ({
@@ -273,10 +274,16 @@ app.post('/api/auth/logout', (req, res) => {
 app.get('/api/admin/drivers', requireAdmin, async (req, res) => {
   try {
     const [rows] = await pool.execute(
-      `SELECT user_id, email, first_name, last_name, created_at
-       FROM users WHERE role = 'driver' ORDER BY created_at DESC, user_id DESC`,
+      `SELECT u.user_id, u.email, u.first_name, u.last_name, u.created_at,
+              GROUP_CONCAT(DISTINCT s.name ORDER BY s.name SEPARATOR ', ') AS affiliation
+       FROM users u
+       LEFT JOIN driver_applications a ON a.driver_user_id = u.user_id AND a.status = 'approved'
+       LEFT JOIN sponsors s ON s.sponsor_id = a.sponsor_id
+       WHERE u.role = 'driver'
+       GROUP BY u.user_id, u.email, u.first_name, u.last_name, u.created_at
+       ORDER BY u.created_at DESC, u.user_id DESC`,
     );
-    return res.json({ drivers: rows.map(adminDriver) });
+    return res.json({ drivers: rows.map((driver) => ({ ...adminDriver(driver), affiliation: driver.affiliation || null })) });
   } catch (error) {
     console.error('Driver list failed:', error.message);
     return res.status(500).json({ message: 'Unable to load driver accounts.' });
@@ -383,13 +390,35 @@ app.get('/api/driver/conversion', async (req, res) => {
 app.get('/api/admin/sponsors', requireAdmin, async (req, res) => {
   try {
     const [rows] = await pool.execute(
-      `SELECT user_id, email, first_name, last_name, created_at
-       FROM users WHERE role = 'sponsor' ORDER BY created_at DESC, user_id DESC`,
+      `SELECT u.user_id, u.email, u.first_name, u.last_name, u.created_at,
+            s.name AS affiliation
+       FROM users u
+       LEFT JOIN sponsors s ON s.sponsor_id = u.sponsor_id
+       WHERE u.role = 'sponsor'
+       ORDER BY u.created_at DESC, u.user_id DESC`,
     );
-    return res.json({ sponsors: rows.map(adminDriver) });
+     return res.json({ sponsors: rows.map((sponsor) => ({ ...adminDriver(sponsor), affiliation: sponsor.affiliation || null })) });
   } catch (error) {
     console.error('Sponsor user list failed:', error.message);
     return res.status(500).json({ message: 'Unable to load sponsor accounts.' });
+  }
+});
+
+app.get('/api/admin/sponsor-applications', requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT a.application_id, a.status, a.submitted_at, a.decided_at,
+              u.user_id AS driver_user_id, u.first_name, u.last_name, u.email,
+              s.sponsor_id, s.name AS sponsor_name
+       FROM driver_applications a
+       JOIN users u ON u.user_id = a.driver_user_id
+       JOIN sponsors s ON s.sponsor_id = a.sponsor_id
+       ORDER BY a.submitted_at DESC`,
+    );
+    return res.json({ applications: rows });
+  } catch (error) {
+    console.error('Admin sponsor application lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load sponsor applications.' });
   }
 });
 
@@ -972,9 +1001,8 @@ app.post('/api/points/apply', requireRole('sponsor'), async (req, res) => {
   }
 });
 
-// Dashboard data for the signed-in user. The sponsor is whichever sponsor(s)
-// approved this driver's application. The balance and recent updates come
-// from point_audit_log; purchases aren't stored yet, so they stay empty.
+// Dashboard data for the signed-in user. Sponsor applications determine the
+// driver's affiliations. The balance and recent updates come from the point log.
 app.get('/api/driver', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
 
@@ -986,7 +1014,7 @@ app.get('/api/driver', async (req, res) => {
     if (!users[0]) return res.status(401).json({ message: 'Session expired.' });
 
     const [sponsors] = await pool.execute(
-      `SELECT s.name
+      `SELECT s.sponsor_id AS id, s.name
        FROM driver_applications a
        JOIN sponsors s ON s.sponsor_id = a.sponsor_id
        WHERE a.driver_user_id = ? AND a.status = 'approved'
@@ -1002,7 +1030,8 @@ app.get('/api/driver', async (req, res) => {
       [req.session.userId],
     );
     const [recent] = await pool.execute(
-      `SELECT l.log_id, r.description, r.pt_value, DATE_FORMAT(l.timestamp, '%b %e, %Y') AS date
+      `SELECT l.log_id, COALESCE(NULLIF(l.comment, ''), r.description) AS description,
+              r.pt_value, DATE_FORMAT(l.timestamp, '%b %e, %Y') AS date
        FROM point_audit_log l
        JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
        WHERE l.affected_user_id = ?
@@ -1011,18 +1040,21 @@ app.get('/api/driver', async (req, res) => {
       [req.session.userId],
     );
 
+    const balanceNotifications = recent.map((entry) => ({
+      id: entry.log_id,
+      label: entry.description || 'Unspecified',
+      date: entry.date,
+      amount: Number(entry.pt_value),
+    }));
+
     return res.json({
       id: users[0].user_id,
       name: `${users[0].first_name} ${users[0].last_name}`.trim(),
       dateJoined: users[0].created_at,
       sponsorName: sponsors.map((sponsor) => sponsor.name).join(', '),
-      points: Number(balance.points),
-      balanceNotifications: recent.map((entry) => ({
-        id: entry.log_id,
-        label: entry.description || 'Point adjustment',
-        date: entry.date,
-        amount: Number(entry.pt_value),
-      })),
+      sponsors,
+      points: Number(balance?.points || 0),
+      balanceNotifications,
       recentPurchases: [],
     });
   } catch (error) {

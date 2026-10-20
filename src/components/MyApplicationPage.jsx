@@ -8,7 +8,7 @@ function formatDate(dateStr) {
   });
 }
 
-export default function MyApplicationPage({ user }) {
+export default function MyApplicationPage({ user, preview = false }) {
   const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -26,9 +26,13 @@ export default function MyApplicationPage({ user }) {
   };
 
   useEffect(() => {
+    if (preview) {
+      setLoading(false);
+      return;
+    }
     loadApplications();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [preview]);
 
   const withdraw = async (applicationId) => {
     setWithdrawingId(applicationId);
@@ -50,12 +54,14 @@ export default function MyApplicationPage({ user }) {
   return (
     <main className="applications-page">
       <section className="applications-page__intro">
-        <p className="applications-page__eyebrow">My Application</p>
-        <h1>Track your sponsor applications.</h1>
-        <p>See where each application stands, and withdraw one if you change your mind.</p>
+        <p className="applications-page__eyebrow">{preview ? 'Preview application' : 'My Application'}</p>
+        <h1>{preview ? 'Application preview.' : 'Track your sponsor applications.'}</h1>
+        <p>{preview ? 'The authenticated administrator is viewing the application experience without changing any records.' : 'See where each application stands, and withdraw one if you change your mind.'}</p>
       </section>
 
-      {loading ? (
+      {preview ? (
+        <p className="applications-page__empty">No driver application records are available for the administrator account.</p>
+      ) : loading ? (
         <p className="applications-page__empty">Loading your applications...</p>
       ) : loadError ? (
         <p className="applications-page__empty" role="alert">{loadError}</p>

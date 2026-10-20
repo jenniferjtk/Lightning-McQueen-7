@@ -27,13 +27,13 @@ describe('admin driver management', () => {
     const agent = await signIn(app, users.admin);
     mockQueries([
       roleLookup,
-      ["WHERE role = 'driver'", [{ user_id: 1, email: 'driver@test.com', first_name: 'Dana', last_name: 'Driver', created_at: '2026-09-01' }]],
+      ['WHERE u.role = \'driver\'', [{ user_id: 1, email: 'driver@test.com', first_name: 'Dana', last_name: 'Driver', created_at: '2026-09-01', affiliation: 'Acme Trucking' }]],
     ]);
 
     const res = await agent.get('/api/admin/drivers').expect(200);
 
     expect(res.body.drivers).toEqual([
-      { id: 1, email: 'driver@test.com', firstName: 'Dana', lastName: 'Driver', createdAt: '2026-09-01' },
+      { id: 1, email: 'driver@test.com', firstName: 'Dana', lastName: 'Driver', createdAt: '2026-09-01', affiliation: 'Acme Trucking' },
     ]);
   });
 

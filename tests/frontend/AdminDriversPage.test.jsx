@@ -16,7 +16,7 @@ it('edits, resets passwords, and deletes sponsors through the sponsor routes', a
   vi.spyOn(window, 'confirm').mockReturnValue(true);
   render(<AdminDriversPage />);
   await screen.findByRole('cell', { name: 'Sam Sponsor' });
-  const list = within(screen.getByRole('region', { name: 'All sponsor users' }));
+  const list = within(screen.getByRole('region', { name: 'Sponsors' }));
   fireEvent.click(list.getByRole('button', { name: 'Edit' }));
   fireEvent.change(list.getByLabelText('First name'), { target: { value: 'Updated' } });
   fireEvent.click(list.getByRole('button', { name: 'Save' }));
@@ -53,22 +53,25 @@ it.each(['Driver', 'Sponsor', 'Admin'])('creates a %s using the shared fields', 
   expect(fetch).toHaveBeenLastCalledWith('/api/admin/users', expect.objectContaining({
     method: 'POST', body: JSON.stringify({ firstName: 'New', lastName: 'User', email: 'new@example.com', password: 'test-password', role }),
   }));
-  expect(within(screen.getByRole('region', { name: 'All drivers' })).queryByRole('cell', { name: 'new@example.com' }) !== null).toBe(role === 'driver');
-  expect(within(screen.getByRole('region', { name: 'All sponsor users' })).queryByRole('cell', { name: 'new@example.com' }) !== null).toBe(role === 'sponsor');
+  const driverSection = within(screen.getByRole('region', { name: 'Drivers' }));
+  const sponsorSection = within(screen.getByRole('region', { name: 'Sponsors' }));
+  expect(driverSection.getByText(role === 'driver' ? '1' : '0', { selector: '.admin-account-count' })).toBeInTheDocument();
+  expect(sponsorSection.getByText(role === 'sponsor' ? '1' : '0', { selector: '.admin-account-count' })).toBeInTheDocument();
+  expect(driverSection.queryByRole('cell', { name: 'new@example.com' }) !== null).toBe(role === 'driver');
+  expect(sponsorSection.queryByRole('cell', { name: 'new@example.com' }) !== null).toBe(role === 'sponsor');
 });
 
-it('loads sponsor users and searches them independently from drivers', async () => {
+it('shows driver and sponsor affiliations on the same page', async () => {
   vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url) => ({
     ok: true,
     json: async () => url.endsWith('/drivers')
-      ? { drivers: [{ id: 1, firstName: 'Dana', lastName: 'Driver', email: 'driver@example.com' }] }
-      : { sponsors: [{ id: 2, firstName: 'Sam', lastName: 'Sponsor', email: 'sponsor@example.com', createdAt: '2026-10-05' }] },
+      ? { drivers: [{ id: 1, firstName: 'Dana', lastName: 'Driver', email: 'driver@example.com', affiliation: 'Acme Trucking, Roadrunner Logistics' }] }
+      : { sponsors: [{ id: 2, firstName: 'Sam', lastName: 'Sponsor', email: 'sponsor@example.com', createdAt: '2026-10-05', affiliation: 'Acme Trucking' }] },
   })));
   render(<AdminDriversPage />);
+  expect(await screen.findByRole('cell', { name: 'Acme Trucking, Roadrunner Logistics' })).toBeInTheDocument();
   expect(await screen.findByRole('cell', { name: 'Sam Sponsor' })).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText('Search sponsor users'), { target: { value: 'missing' } });
-  expect(screen.getByText('No sponsor accounts match your search.')).toBeInTheDocument();
-  expect(screen.getByRole('cell', { name: 'Dana Driver' })).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText('Search sponsor users'), { target: { value: ' SAM ' } });
-  expect(screen.getByRole('cell', { name: 'Sam Sponsor' })).toBeInTheDocument();
+  expect(screen.getByRole('cell', { name: 'Acme Trucking' })).toBeInTheDocument();
+  expect(within(screen.getByRole('region', { name: 'Drivers' })).getByText('1', { selector: '.admin-account-count' })).toBeInTheDocument();
+  expect(within(screen.getByRole('region', { name: 'Sponsors' })).getByText('1', { selector: '.admin-account-count' })).toBeInTheDocument();
 });

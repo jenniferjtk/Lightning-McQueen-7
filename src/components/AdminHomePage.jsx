@@ -95,7 +95,7 @@ function SponsorAccountLinks() {
   );
 }
 
-export default function AdminHomePage({ user, onPageChange }) {
+export default function AdminHomePage({ user, onPageChange, onPreviewRole }) {
   const name = user?.firstName || 'Administrator';
 
   return (
@@ -114,7 +114,20 @@ export default function AdminHomePage({ user, onPageChange }) {
           <button type="button" onClick={() => onPageChange('drivers')}>Open User management</button>
         </article>
       </section>
+
       <SponsorAccountLinks />
+
+      <section className="admin-view-preview" aria-labelledby="admin-view-preview-title">
+        <div>
+          <p className="admin-home-page__eyebrow">Preview portal</p>
+          <h2 id="admin-view-preview-title">Test a user experience</h2>
+          <p>Preview the driver or sponsor portal using your administrator account details.</p>
+        </div>
+        <div className="admin-view-preview__actions">
+          <button type="button" onClick={() => onPreviewRole('driver')}>Preview driver view</button>
+          <button type="button" onClick={() => onPreviewRole('sponsor')}>Preview sponsor view</button>
+        </div>
+      </section>
     </main>
   );
 }

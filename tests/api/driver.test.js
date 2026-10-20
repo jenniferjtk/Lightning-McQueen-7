@@ -7,7 +7,7 @@ const { app } = await import('../../index.js');
 
 const driverQueries = ({ balance, recent }) => [
   ['SELECT user_id, first_name, last_name, created_at FROM users', [{ ...users.driver, created_at: '2026-09-29' }]],
-  ["a.status = 'approved'", [{ name: 'Acme Trucking' }]],
+  ["a.status = 'approved'", [{ id: 10, name: 'Acme Trucking' }]],
   ['COALESCE(SUM(r.pt_value), 0)', [{ points: balance }]],
   ['LIMIT 5', recent],
   roleLookup,

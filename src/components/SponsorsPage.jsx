@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 
-export default function SponsorsPage({ user }) {
+export default function SponsorsPage({ user, readOnly = false }) {
   const [sponsors, setSponsors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -37,9 +37,9 @@ export default function SponsorsPage({ user }) {
   return (
     <main className="sponsors-page">
       <section className="sponsors-page__intro">
-        <p className="sponsors-page__eyebrow">Sponsors</p>
-        <h1>Find a sponsor to drive for.</h1>
-        <p>Browse available sponsors and submit an application to join their rewards program.</p>
+        <p className="sponsors-page__eyebrow">{readOnly ? 'Preview sponsors' : 'Sponsors'}</p>
+        <h1>{readOnly ? 'Sponsor directory preview.' : 'Find a sponsor to drive for.'}</h1>
+        <p>{readOnly ? 'The administrator is browsing the sponsor directory without submitting an application.' : 'Browse available sponsors and submit an application to join their rewards program.'}</p>
       </section>
 
       {loading ? (
@@ -59,14 +59,18 @@ export default function SponsorsPage({ user }) {
                 <p className="sponsor-card__rate">
                   {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 4 }).format(Number(sponsor.point_conversion_rate))} per point
                 </p>
-                <button
-                  type="button"
-                  className="sponsor-card__apply"
-                  disabled={applyingId === sponsor.sponsor_id}
-                  onClick={() => apply(sponsor.sponsor_id)}
-                >
-                  {applyingId === sponsor.sponsor_id ? 'Applying...' : 'Apply'}
-                </button>
+                {readOnly ? (
+                  <span className="sponsor-card__read-only">Preview only</span>
+                ) : (
+                  <button
+                    type="button"
+                    className="sponsor-card__apply"
+                    disabled={applyingId === sponsor.sponsor_id}
+                    onClick={() => apply(sponsor.sponsor_id)}
+                  >
+                    {applyingId === sponsor.sponsor_id ? 'Applying...' : 'Apply'}
+                  </button>
+                )}
                 {message && (
                   <p className={message.type === 'error' ? 'sponsor-card__message sponsor-card__message--error' : 'sponsor-card__message sponsor-card__message--success'} role="alert">
                     {message.text}

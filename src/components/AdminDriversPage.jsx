@@ -277,10 +277,9 @@ export default function AdminDriversPage() {
       <section className="admin-drivers-page__intro">
         <div>
           <p className="admin-home-page__eyebrow">Administration</p>
-          <h1>Driver accounts</h1>
-          <p>Create driver, admin, and sponsor accounts. The lists below show drivers and sponsor users.</p>
+          <h1>User accounts</h1>
+          <p>View sponsor affiliations and manage driver, admin, and sponsor accounts.</p>
         </div>
-        <p className="admin-drivers-page__count">{drivers.length} driver{drivers.length === 1 ? '' : 's'}</p>
       </section>
 
       {error && <p className="admin-drivers-page__message admin-drivers-page__message--error" role="alert">{error}</p>}
@@ -301,7 +300,10 @@ export default function AdminDriversPage() {
 
       <section className="admin-driver-list card" aria-labelledby="driver-list-title">
         <div className="admin-driver-list__header">
-          <h2 className="card__title" id="driver-list-title">All drivers</h2>
+          <div className="admin-driver-list__title">
+            <h2 className="card__title" id="driver-list-title">Drivers</h2>
+            <span className="admin-account-count">{drivers.length}</span>
+          </div>
           <label className="admin-driver-list__search">Search drivers<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Name or email" /></label>
         </div>
 
@@ -310,9 +312,9 @@ export default function AdminDriversPage() {
         ) : (
           <div className="admin-driver-list__table-wrap">
             <table className="admin-driver-table">
-              <thead><tr><th>Driver</th><th>Email</th><th>Joined</th><th><span className="sr-only">Actions</span></th></tr></thead>
+              <thead><tr><th>Driver</th><th>Email</th><th>Sponsor affiliation</th><th>Joined</th><th><span className="sr-only">Actions</span></th></tr></thead>
               <tbody>{filteredDrivers.map((driver) => resettingId === driver.id ? (
-                <tr key={driver.id} className="admin-driver-table__edit-row"><td colSpan="4">
+                <tr key={driver.id} className="admin-driver-table__edit-row"><td colSpan="5">
                   <form className="admin-driver-edit" onSubmit={(event) => resetDriverPassword(event, driver)}>
                     <span>Reset password for {driver.firstName} {driver.lastName}</span>
                     <label>New password<input type="password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} minLength="8" autoComplete="new-password" disabled={saving} required autoFocus /></label>
@@ -322,7 +324,7 @@ export default function AdminDriversPage() {
                   </form>
                 </td></tr>
               ) : editingId === driver.id ? (
-                <tr key={driver.id} className="admin-driver-table__edit-row"><td colSpan="4">
+                <tr key={driver.id} className="admin-driver-table__edit-row"><td colSpan="5">
                   <form className="admin-driver-edit" onSubmit={saveEdit}>
                     <label>First name<input value={editDriver.firstName} onChange={(event) => setEditDriver((current) => ({ ...current, firstName: event.target.value }))} required /></label>
                     <label>Last name<input value={editDriver.lastName} onChange={(event) => setEditDriver((current) => ({ ...current, lastName: event.target.value }))} required /></label>
@@ -332,7 +334,7 @@ export default function AdminDriversPage() {
                   </form>
                 </td></tr>
               ) : (
-                <tr key={driver.id}><td>{driver.firstName} {driver.lastName}</td><td>{driver.email}</td><td>{driver.createdAt ? new Date(driver.createdAt).toLocaleDateString() : '—'}</td><td className="admin-driver-table__actions"><button type="button" onClick={() => beginEdit(driver)} disabled={saving}>Edit</button><button type="button" disabled={saving} onClick={() => { setEditingId(null); setEditDriver(null); setResettingId(driver.id); setResetPassword(''); setConfirmPassword(''); setError(''); setNotice(''); }}>Reset password</button><button type="button" className="admin-driver-button--delete" onClick={() => deleteDriver(driver)} disabled={saving}>Delete</button></td></tr>
+                <tr key={driver.id}><td>{driver.firstName} {driver.lastName}</td><td>{driver.email}</td><td>{driver.affiliation || 'None'}</td><td>{driver.createdAt ? new Date(driver.createdAt).toLocaleDateString() : '—'}</td><td className="admin-driver-table__actions"><button type="button" onClick={() => beginEdit(driver)} disabled={saving}>Edit</button><button type="button" disabled={saving} onClick={() => { setEditingId(null); setEditDriver(null); setResettingId(driver.id); setResetPassword(''); setConfirmPassword(''); setError(''); setNotice(''); }}>Reset password</button><button type="button" className="admin-driver-button--delete" onClick={() => deleteDriver(driver)} disabled={saving}>Delete</button></td></tr>
               ))}</tbody>
             </table>
           </div>
@@ -340,7 +342,10 @@ export default function AdminDriversPage() {
       </section>
       <section className="admin-driver-list card" aria-labelledby="sponsor-list-title">
         <div className="admin-driver-list__header">
-          <h2 className="card__title" id="sponsor-list-title">All sponsor users</h2>
+          <div className="admin-driver-list__title">
+            <h2 className="card__title" id="sponsor-list-title">Sponsors</h2>
+            <span className="admin-account-count">{sponsors.length}</span>
+          </div>
           <label className="admin-driver-list__search">Search sponsor users<input type="search" value={sponsorSearch} onChange={(event) => setSponsorSearch(event.target.value)} placeholder="Name or email" /></label>
         </div>
 
@@ -351,9 +356,9 @@ export default function AdminDriversPage() {
         ) : (
           <div className="admin-driver-list__table-wrap">
             <table className="admin-driver-table">
-              <thead><tr><th>Sponsor user</th><th>Email</th><th>Joined</th><th><span className="sr-only">Actions</span></th></tr></thead>
+              <thead><tr><th>Sponsor user</th><th>Email</th><th>Sponsor affiliation</th><th>Joined</th><th><span className="sr-only">Actions</span></th></tr></thead>
               <tbody>{filteredSponsors.map((sponsor) => resettingSponsorId === sponsor.id ? (
-                <tr key={sponsor.id} className="admin-driver-table__edit-row"><td colSpan="4">
+                <tr key={sponsor.id} className="admin-driver-table__edit-row"><td colSpan="5">
                   <form className="admin-driver-edit" onSubmit={(event) => resetSponsorPassword(event, sponsor)}>
                     <span>Reset password for {sponsor.firstName} {sponsor.lastName}</span>
                     <label>New password<input type="password" value={sponsorPassword} onChange={(event) => setSponsorPassword(event.target.value)} minLength="8" autoComplete="new-password" disabled={saving} required autoFocus /></label>
@@ -363,7 +368,7 @@ export default function AdminDriversPage() {
                   </form>
                 </td></tr>
               ) : editingSponsorId === sponsor.id ? (
-                <tr key={sponsor.id} className="admin-driver-table__edit-row"><td colSpan="4">
+                <tr key={sponsor.id} className="admin-driver-table__edit-row"><td colSpan="5">
                   <form className="admin-driver-edit" onSubmit={saveSponsorEdit}>
                     <label>First name<input value={editSponsor.firstName} onChange={(event) => setEditSponsor((current) => ({ ...current, firstName: event.target.value }))} required /></label>
                     <label>Last name<input value={editSponsor.lastName} onChange={(event) => setEditSponsor((current) => ({ ...current, lastName: event.target.value }))} required /></label>
@@ -373,7 +378,7 @@ export default function AdminDriversPage() {
                   </form>
                 </td></tr>
               ) : (
-                <tr key={sponsor.id}><td>{sponsor.firstName} {sponsor.lastName}</td><td>{sponsor.email}</td><td>{sponsor.createdAt ? new Date(sponsor.createdAt).toLocaleDateString() : '—'}</td><td className="admin-driver-table__actions"><button type="button" onClick={() => beginSponsorEdit(sponsor)} disabled={saving}>Edit</button><button type="button" disabled={saving} onClick={() => { setEditingSponsorId(null); setEditSponsor(null); setResettingSponsorId(sponsor.id); setSponsorPassword(''); setConfirmSponsorPassword(''); setError(''); setNotice(''); }}>Reset password</button><button type="button" className="admin-driver-button--delete" onClick={() => deleteSponsor(sponsor)} disabled={saving}>Delete</button></td></tr>
+                <tr key={sponsor.id}><td>{sponsor.firstName} {sponsor.lastName}</td><td>{sponsor.email}</td><td>{sponsor.affiliation || 'Not linked'}</td><td>{sponsor.createdAt ? new Date(sponsor.createdAt).toLocaleDateString() : '—'}</td><td className="admin-driver-table__actions"><button type="button" onClick={() => beginSponsorEdit(sponsor)} disabled={saving}>Edit</button><button type="button" disabled={saving} onClick={() => { setEditingSponsorId(null); setEditSponsor(null); setResettingSponsorId(sponsor.id); setSponsorPassword(''); setConfirmSponsorPassword(''); setError(''); setNotice(''); }}>Reset password</button><button type="button" className="admin-driver-button--delete" onClick={() => deleteSponsor(sponsor)} disabled={saving}>Delete</button></td></tr>
               ))}</tbody>
             </table>
           </div>

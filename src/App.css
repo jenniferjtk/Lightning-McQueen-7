@@ -12,6 +12,8 @@
   --font-body: 'Inter', system-ui, sans-serif;
   --font-mono: 'Roboto Mono', ui-monospace, monospace;
 }
+.admin-driver-list__title { align-items: center; display: flex; gap: 0.65rem; }
+.admin-account-count { align-items: center; background: #edf1f3; border: 1px solid #d7dfe4; border-radius: 999px; color: var(--color-asphalt); display: inline-flex; font-size: 0.78rem; font-weight: 700; height: 1.65rem; justify-content: center; min-width: 1.65rem; padding: 0 0.4rem; }
 
 * {
   box-sizing: border-box;
@@ -552,6 +554,31 @@ body {
   color: var(--color-steel);
 }
 
+.catalog-page { margin: 0 auto; max-width: 1240px; padding: 2.5rem 2rem 4rem; }
+.catalog-page__intro { margin: 0 0 2rem; }
+.catalog-page__eyebrow, .catalog-section__eyebrow { color: var(--color-steel); font-size: 0.76rem; font-weight: 800; margin: 0 0 0.45rem; text-transform: uppercase; }
+.catalog-page__intro h1 { color: var(--color-asphalt); font-size: 2rem; margin: 0; }
+.catalog-page__intro > p:last-child { color: var(--color-slate); margin: 0.55rem 0 0; }
+.catalog-section { border-top: 1px solid #d8dee3; padding: 1.5rem 0 2rem; }
+.catalog-section__heading { align-items: end; display: flex; flex-wrap: wrap; gap: 1rem; justify-content: space-between; margin-bottom: 1.25rem; }
+.catalog-section__heading h2 { color: var(--color-asphalt); font-size: 1.3rem; margin: 0; }
+.catalog-sponsor-tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.catalog-sponsor-tabs__tab { background: #eef1f3; border: 1px solid #d5dce1; border-radius: 4px; color: var(--color-asphalt); cursor: pointer; font: inherit; font-weight: 700; padding: 0.65rem 0.9rem; }
+.catalog-sponsor-tabs__tab--active { background: var(--color-asphalt); border-color: var(--color-asphalt); color: white; }
+.catalog-empty { align-items: center; background: #f5f7f8; border: 1px dashed #c7d0d7; display: flex; flex-direction: column; justify-content: center; min-height: 220px; padding: 2rem; text-align: center; }
+.catalog-empty__mark { align-items: center; background: #f2bd69; border-radius: 50%; color: var(--color-asphalt); display: flex; font-size: 1rem; font-weight: 800; height: 2.6rem; justify-content: center; margin-bottom: 0.7rem; width: 2.6rem; }
+.catalog-empty h3, .catalog-orders__empty h3 { color: var(--color-asphalt); font-size: 1rem; margin: 0; }
+.catalog-empty p, .catalog-orders__empty p { color: var(--color-slate); margin: 0.45rem 0 0; }
+.catalog-orders { margin-top: 0.5rem; }
+.catalog-orders__empty { border-top: 1px solid #e0e5e8; padding: 1.25rem 0; }
+
+@media (max-width: 640px) {
+  .catalog-page { padding: 1.5rem 1rem 3rem; }
+  .catalog-section__heading { align-items: flex-start; flex-direction: column; }
+  .catalog-sponsor-tabs { width: 100%; }
+  .catalog-sponsor-tabs__tab { flex: 1 1 auto; }
+}
+
 .state-screen {
   min-height: 100vh;
   display: flex;
@@ -597,6 +624,12 @@ body {
 .auth-form__error { color: #a2382b; font-size: 0.85rem; margin: 0; }
 .navbar__logout { border: 1px solid #667382; border-radius: 4px; background: transparent; color: #d8d3c6; cursor: pointer; font: inherit; font-size: 0.82rem; padding: 0.4rem 0.65rem; }
 .navbar__logout:hover { border-color: #fff; color: #fff; }
+.navbar__preview-controls { align-items: center; display: flex; gap: 0.9rem; margin-left: auto; }
+.navbar__preview-label { color: #f2bd69; font-size: 0.84rem; font-weight: 700; }
+.navbar__preview-exit { background: transparent; border: 1px solid #8994a0; border-radius: 4px; color: #fff; cursor: pointer; font: inherit; font-size: 0.82rem; padding: 0.45rem 0.7rem; }
+.navbar__preview-exit:hover, .navbar__preview-exit:focus-visible { border-color: #fff; }
+.account-preview-note, .dashboard-preview-note { background: #eef4f8; border-left: 4px solid var(--color-steel); color: #324b5d; margin: 0 0 1rem; padding: 0.85rem 1rem; }
+.dashboard-preview-note { margin-top: 0; }
 
 .admin-home-page {
   max-width: 960px;
@@ -657,6 +690,24 @@ body {
 .admin-action-card > p:not(.admin-action-card__label) { color: var(--color-slate); line-height: 1.5; margin: 0.75rem 0 1.5rem; }
 .admin-action-card button { background: var(--color-asphalt); border: 0; border-radius: 5px; color: #fff; cursor: pointer; font: inherit; font-weight: 700; margin-top: auto; padding: 0.7rem 0.8rem; text-align: left; }
 .admin-action-card button:hover, .admin-action-card button:focus-visible { background: var(--color-steel); }
+
+.admin-view-preview {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--color-line);
+  border-left: 4px solid var(--color-steel);
+  display: flex;
+  gap: 2rem;
+  justify-content: space-between;
+  margin-top: 2rem;
+  padding: 1.5rem;
+}
+
+.admin-view-preview h2 { font-size: 1.2rem; margin: 0; }
+.admin-view-preview p:not(.admin-home-page__eyebrow) { color: var(--color-slate); margin: 0.5rem 0 0; }
+.admin-view-preview__actions { display: flex; flex-wrap: wrap; gap: 0.65rem; }
+.admin-view-preview__actions button { background: var(--color-asphalt); border: 0; border-radius: 4px; color: #fff; cursor: pointer; font: inherit; font-size: 0.85rem; font-weight: 700; padding: 0.7rem 0.85rem; }
+.admin-view-preview__actions button:hover, .admin-view-preview__actions button:focus-visible { background: var(--color-steel); }
 
 .admin-drivers-page { max-width: 1100px; margin: 0 auto; padding: 3rem 1.5rem 4rem; }
 .admin-drivers-page__intro { align-items: end; display: flex; gap: 1rem; justify-content: space-between; margin-bottom: 2rem; }
@@ -1205,6 +1256,10 @@ body {
 
   .navbar__logout { margin-left: auto; }
 
+  .navbar__preview-controls { margin-left: auto; }
+
+  .admin-view-preview { align-items: flex-start; flex-direction: column; gap: 1rem; }
+
   .edit-account-form__row {
     grid-template-columns: 1fr;
   }
@@ -1530,6 +1585,18 @@ body {
 .sponsor-card__apply:disabled {
   cursor: wait;
   opacity: 0.7;
+}
+
+.sponsor-card__read-only {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  color: var(--color-slate);
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 0.7rem 1rem;
+  text-align: center;
 }
 
 .sponsor-card__message {
