@@ -542,6 +542,28 @@ app.post('/api/admin/users', requireAdmin, async (req, res) => {
   }
 });
 
+app.put('/api/admin/users/:userId/role', requireAdmin, async (req, res) => {
+  const userId = Number(req.params.userId);
+  const { role } = req.body || {};
+  if (!Number.isSafeInteger(userId) || userId < 1 || !['driver', 'sponsor'].includes(role)) {
+    return res.status(400).json({ message: 'Choose a valid user account and role.' });
+  }
+  try {
+    const [result] = await pool.execute(
+      `UPDATE users SET role = ?, sponsor_id = NULL
+       WHERE user_id = ? AND role IN ('driver', 'sponsor') AND role <> ?`,
+      [role, userId, role],
+    );
+    if (!result.affectedRows) {
+      return res.status(404).json({ message: 'A driver or sponsor account with a different role was not found.' });
+    }
+    return res.json({ user: { id: userId, role } });
+  } catch (error) {
+    console.error('User role update failed:', error.message);
+    return res.status(500).json({ message: 'Unable to update the user role.' });
+  }
+});
+
 app.post('/api/admin/drivers', requireAdmin, async (req, res) => {
   const { email, password, firstName, lastName } = req.body;
   if (!validEmail(email) || !password || !firstName?.trim() || !lastName?.trim()) {

@@ -74,6 +74,27 @@ it('requires an authenticated admin to create accounts', async () => {
   }
 });
 
+it.each(['driver', 'sponsor'])('lets an admin change a user to the %s role', async (role) => {
+  const agent = await signIn(app, users.admin);
+  mockQueries([roleLookup, ['UPDATE users SET role = ?', { affectedRows: 1 }]]);
+
+  const response = await agent.put('/api/admin/users/1/role').send({ role }).expect(200);
+
+  expect(response.body).toEqual({ user: { id: 1, role } });
+  expect(db.execute).toHaveBeenLastCalledWith(
+    expect.stringContaining("role IN ('driver', 'sponsor') AND role <> ?"),
+    [role, 1, role],
+  );
+});
+
+it('does not allow changing admin accounts or invalid roles', async () => {
+  const agent = await signIn(app, users.admin);
+  mockQueries([roleLookup, ['UPDATE users SET role = ?', { affectedRows: 0 }]]);
+
+  await agent.put('/api/admin/users/3/role').send({ role: 'driver' }).expect(404);
+  await agent.put('/api/admin/users/1/role').send({ role: 'admin' }).expect(400);
+});
+
 it.each(['driver', 'sponsor', 'admin'])('creates a %s with a hashed password', async (role) => {
   const agent = await signIn(app, users.admin);
   let inserted;

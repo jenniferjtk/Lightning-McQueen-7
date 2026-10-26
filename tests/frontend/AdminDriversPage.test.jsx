@@ -127,3 +127,28 @@ it('updates a sponsor organization when its dropdown changes without a save butt
   }));
   expect(sponsorSection.queryByRole('button', { name: 'Save link' })).not.toBeInTheDocument();
 });
+
+it('changes a driver to a sponsor and moves the account to the sponsor list', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url, options) => ({
+    ok: true,
+    json: async () => url === '/api/admin/drivers'
+      ? { drivers: [{ id: 1, firstName: 'Dana', lastName: 'Driver', email: 'dana@example.com' }] }
+      : url === '/api/admin/sponsors'
+        ? { sponsors: [] }
+        : url.endsWith('/sponsor-links')
+          ? { sponsors: [], sponsorUsers: [] }
+          : { user: { id: 1, role: JSON.parse(options.body).role } },
+  })));
+  render(<AdminDriversPage />);
+
+  const driverSection = within(screen.getByRole('region', { name: 'Drivers' }));
+  const roleSelect = await driverSection.findByLabelText('Account type for Dana Driver');
+  fireEvent.change(roleSelect, { target: { value: 'sponsor' } });
+
+  const sponsorSection = within(screen.getByRole('region', { name: 'Sponsors' }));
+  expect(await sponsorSection.findByRole('cell', { name: 'Dana Driver' })).toBeInTheDocument();
+  expect(driverSection.queryByRole('cell', { name: 'dana@example.com' })).not.toBeInTheDocument();
+  expect(fetch).toHaveBeenLastCalledWith('/api/admin/users/1/role', expect.objectContaining({
+    method: 'PUT', body: JSON.stringify({ role: 'sponsor' }),
+  }));
+});
