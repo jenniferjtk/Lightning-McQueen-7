@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 
-export default function AccountPage({ user, onProfileUpdate, roleOverride = null, readOnly = false }) {
+export default function AccountPage({ user, sponsors = [], onProfileUpdate, roleOverride = null, readOnly = false }) {
   const isDriver = (roleOverride || user?.role) === 'driver';
   const isSponsor = (roleOverride || user?.role) === 'sponsor';
   const [form, setForm] = useState({
@@ -208,10 +208,19 @@ export default function AccountPage({ user, onProfileUpdate, roleOverride = null
               <input name="phone" value={form.phone} onChange={updateField} placeholder="(555) 123-4567" disabled={readOnly} />
             </label>
 
-            {isDriver && <label>
-              Sponsor
-              <input name="sponsorName" value={form.sponsorName} onChange={updateField} placeholder="Sponsor name" disabled={readOnly} />
-            </label>}
+            {isDriver && (sponsors.length > 1 ? (
+              <div className="account-sponsors">
+                <p className="account-sponsors__label">Sponsors</p>
+                <ul>
+                  {sponsors.map((sponsor) => <li key={sponsor.id}>{sponsor.name}</li>)}
+                </ul>
+              </div>
+            ) : (
+              <label>
+                Sponsor
+                <input name="sponsorName" value={form.sponsorName} onChange={updateField} placeholder="Sponsor name" disabled={readOnly} />
+              </label>
+            ))}
 
             <form className="password-change" onSubmit={changePassword}>
               <h3>Change password</h3>

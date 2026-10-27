@@ -163,13 +163,13 @@ export default function App() {
       ) : visiblePage === 'about' ? (
         <AboutPage />
       ) : visiblePage === 'account' ? (
-        <AccountPage user={user} roleOverride={previewRole || null} readOnly={isPreview} onProfileUpdate={handleProfileUpdate} />
+        <AccountPage user={user} sponsors={driver.sponsors} roleOverride={previewRole || null} readOnly={isPreview} onProfileUpdate={handleProfileUpdate} />
       ) : visiblePage === 'points' ? (
-        <PointManagementPage user={previewUser} readOnly={isPreview} />
+        <PointManagementPage user={previewUser} sponsors={driver.sponsors} readOnly={isPreview} />
       ) : visiblePage === 'sponsors' ? (
         <SponsorsPage user={previewUser} readOnly={isPreview} />
       ) : visiblePage === 'catalog' ? (
-        <CatalogPage sponsors={driver.sponsors} />
+        <CatalogPage sponsors={driver.sponsors} userId={user.id} />
       ) : visiblePage === 'application' ? (
         <MyApplicationPage user={previewUser} preview={isPreview} />
       ) : (
@@ -205,6 +205,7 @@ export default function App() {
                 name={isPreview ? `${user.firstName} ${user.lastName}`.trim() : driver.name || '—'}
                 dateJoined={isPreview ? user.createdAt || '' : driver.dateJoined || ''}
                 sponsorName={isPreview ? user.sponsorId ? 'Linked sponsor account' : '—' : driver.sponsorName || '—'}
+                sponsors={isPreview ? [] : driver.sponsors}
                 sponsor={isPreview ? null : driver.sponsor}
               />
 
