@@ -49,6 +49,17 @@ async function getJson(path) {
     throw new CatalogProviderError('The catalog provider could not be reached.', { cause: error });
   }
   if (!response.ok) {
+    // Logged so CloudWatch shows whether a refusal came from the provider's
+    // CDN (Cloudflare sets cf-mitigated on challenges) or the provider itself.
+    const body = await response.text().catch(() => '');
+    console.warn('Catalog provider refused request', JSON.stringify({
+      path,
+      status: response.status,
+      server: response.headers.get('server'),
+      cfRay: response.headers.get('cf-ray'),
+      cfMitigated: response.headers.get('cf-mitigated'),
+      body: body.slice(0, 200),
+    }));
     throw new CatalogProviderError(`The catalog provider responded with status ${response.status}.`, { status: response.status });
   }
   const text = await response.text();

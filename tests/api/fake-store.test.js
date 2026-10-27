@@ -72,6 +72,22 @@ describe('Fake Store client', () => {
     await expect(fetchProducts()).rejects.toMatchObject({ name: 'CatalogProviderError', status: 500 });
   });
 
+  it('reports a 403 as a CatalogProviderError and logs what refused it', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Just a moment...', {
+      status: 403,
+      headers: { server: 'cloudflare', 'cf-mitigated': 'challenge' },
+    })));
+
+    await expect(fetchProducts()).rejects.toMatchObject({
+      name: 'CatalogProviderError',
+      status: 403,
+      message: 'The catalog provider responded with status 403.',
+    });
+    expect(warn.mock.calls[0][1]).toContain('"cfMitigated":"challenge"');
+    warn.mockRestore();
+  });
+
   it('rejects malformed provider data instead of passing it through', async () => {
     vi.stubGlobal('fetch', respondWith('<html>maintenance</html>'));
     await expect(fetchProducts()).rejects.toBeInstanceOf(CatalogProviderError);
