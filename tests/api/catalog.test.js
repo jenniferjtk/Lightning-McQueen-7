@@ -235,6 +235,7 @@ describe('driver catalog view', () => {
       ['ORDER BY COALESCE(sc.category_tag', ([id]) => (id === SPONSOR_ID
         ? [cachedRow(rawProducts[1], { category_tag: 'Tech' })]
         : [cachedRow(rawProducts[0], { category_tag: null })])],
+      ['AND r.sponsor_id = ?', ([, sponsorId]) => [{ points: sponsorId === SPONSOR_ID ? 7000 : 50 }]],
     ]);
 
     const first = await agent.get(`/api/sponsors/${SPONSOR_ID}/catalog`).expect(200);
@@ -270,11 +271,9 @@ describe('driver catalog view', () => {
     const agent = await signIn(app, users.sponsor);
     mockQueries([roleLookup, sponsorRow, freshCache, ['ORDER BY COALESCE(sc.category_tag', []]]);
 
-    const own = await agent.get(`/api/sponsors/${SPONSOR_ID}/catalog`).expect(200);
+    const ownCatalog = await agent.get(`/api/sponsors/${SPONSOR_ID}/catalog`).expect(200);
     await agent.get(`/api/sponsors/${OTHER_SPONSOR_ID}/catalog`).expect(403);
-
-    // A point balance only means something for drivers.
-    expect(own.body.pointBalance).toBeNull();
+    expect(ownCatalog.body.pointBalance).toBeNull();
     expect(calls('FROM point_audit_log')).toHaveLength(0);
   });
 

@@ -10,14 +10,22 @@ const createRow = (id) => ({
   isEditing: true,
 });
 
-export default function PointManagementPage({ user, readOnly = false }) {
+export default function PointManagementPage({ user, sponsors = [], readOnly = false }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [message, setMessage] = useState('');
   const [savingId, setSavingId] = useState(null);
   const [nextLocalId, setNextLocalId] = useState(1);
+  const [activeSponsorId, setActiveSponsorId] = useState(sponsors[0]?.id ?? null);
   const canManage = !readOnly && (user?.role === 'admin' || user?.role === 'sponsor');
+  const isDriver = user?.role === 'driver';
+
+  useEffect(() => {
+    if (!sponsors.some((sponsor) => Number(sponsor.id) === Number(activeSponsorId))) {
+      setActiveSponsorId(sponsors[0]?.id ?? null);
+    }
+  }, [activeSponsorId, sponsors]);
 
   useEffect(() => {
     fetch('/api/sponsor-rules', { credentials: 'include' })
@@ -36,6 +44,10 @@ export default function PointManagementPage({ user, readOnly = false }) {
       (row.rule_id ?? row.localId) === id ? { ...row, [field]: value } : row
     )));
   };
+
+  const visibleRows = isDriver
+    ? rows.filter((row) => Number(row.sponsor_id) === Number(activeSponsorId))
+    : rows;
 
   const addRow = () => {
     setRows((currentRows) => [...currentRows, createRow(nextLocalId)]);
@@ -106,6 +118,31 @@ export default function PointManagementPage({ user, readOnly = false }) {
       </section>
 
       <section className="point-entry" aria-label="Sponsor point rules">
+        {isDriver && sponsors.length > 1 && (
+          <div className="point-management-sponsor-tabs" role="tablist" aria-label="Choose sponsor point rules">
+            {sponsors.map((sponsor) => (
+              <button
+                key={sponsor.id}
+                id={`point-management-sponsor-tab-${sponsor.id}`}
+                type="button"
+                role="tab"
+                aria-selected={Number(activeSponsorId) === Number(sponsor.id)}
+                aria-controls="point-management-sponsor-panel"
+                className={Number(activeSponsorId) === Number(sponsor.id)
+                  ? 'point-management-sponsor-tabs__tab point-management-sponsor-tabs__tab--active'
+                  : 'point-management-sponsor-tabs__tab'}
+                onClick={() => setActiveSponsorId(sponsor.id)}
+              >
+                {sponsor.name}
+              </button>
+            ))}
+          </div>
+        )}
+        <div
+          id="point-management-sponsor-panel"
+          role={isDriver && sponsors.length > 1 ? 'tabpanel' : undefined}
+          aria-labelledby={isDriver && sponsors.length > 1 ? `point-management-sponsor-tab-${activeSponsorId}` : undefined}
+        >
         <div className="point-entry__header" aria-hidden="true">
           <span>Points</span>
           <span>Sponsor ID</span>
@@ -115,7 +152,7 @@ export default function PointManagementPage({ user, readOnly = false }) {
         </div>
 
         <div className="point-entry__rows">
-          {rows.map((row, index) => (
+          {visibleRows.map((row, index) => (
             <div className="point-entry__row" key={row.rule_id ?? row.localId}>
               <label>
                 <span className="point-entry__mobile-label">Points</span>
@@ -200,13 +237,14 @@ export default function PointManagementPage({ user, readOnly = false }) {
 
         {loading && <p className="point-entry__state">Loading rules...</p>}
         {loadError && <p className="point-entry__state" role="alert">{loadError}</p>}
-        {!loading && !loadError && rows.length === 0 && <p className="point-entry__state">No point rules yet.</p>}
+        {!loading && !loadError && visibleRows.length === 0 && <p className="point-entry__state">No point rules yet.</p>}
         {message && <p className="point-entry__state" role="status">{message}</p>}
         {canManage && (
           <button className="point-entry__add" type="button" onClick={addRow}>
             <span aria-hidden="true">+</span> Add another rule
           </button>
         )}
+        </div>
       </section>
     </main>
   );

@@ -9,7 +9,7 @@ function formatDate(dateStr) {
   });
 }
 
-export default function ProfileCard({ name, dateJoined, sponsorName, sponsor }) {
+export default function ProfileCard({ name, dateJoined, sponsorName, sponsors = [], sponsor }) {
   const [showSponsorModal, setShowSponsorModal] = useState(false);
 
   return (
@@ -31,7 +31,13 @@ export default function ProfileCard({ name, dateJoined, sponsorName, sponsor }) 
                 Sponsor
               </button>
             </dt>
-            <dd>{sponsorName || '—'}</dd>
+            <dd>
+              {sponsors.length > 1 ? (
+                <span className="profile-card__sponsors">
+                  {sponsors.map((item) => <span key={item.id}>{item.name}</span>)}
+                </span>
+              ) : sponsorName || '—'}
+            </dd>
           </div>
         </dl>
       </section>
