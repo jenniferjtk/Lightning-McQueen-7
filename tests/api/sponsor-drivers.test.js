@@ -121,3 +121,51 @@ describe('sponsor driver point history', () => {
     expect(db.execute).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('sponsor weekly point changes', () => {
+  it('requires authentication', async () => {
+    await request(app).get('/api/sponsor/points/weekly').expect(401);
+  });
+
+  it('returns a seven-day aggregate scoped to the sponsor’s approved drivers', async () => {
+    const agent = await signIn(app, users.sponsor);
+    db.execute.mockClear();
+    mockQueries([
+      roleLookup,
+      ['FROM (', [
+        { date: '2026-10-21', total: '0' },
+        { date: '2026-10-22', total: '20' },
+        { date: '2026-10-23', total: '-5' },
+        { date: '2026-10-24', total: '0' },
+        { date: '2026-10-25', total: '15' },
+        { date: '2026-10-26', total: '0' },
+        { date: '2026-10-27', total: '10' },
+      ]],
+    ]);
+
+    const response = await agent.get('/api/sponsor/points/weekly').expect(200);
+
+    expect(response.body).toEqual([
+      { date: '2026-10-21', total: 0 },
+      { date: '2026-10-22', total: 20 },
+      { date: '2026-10-23', total: -5 },
+      { date: '2026-10-24', total: 0 },
+      { date: '2026-10-25', total: 15 },
+      { date: '2026-10-26', total: 0 },
+      { date: '2026-10-27', total: 10 },
+    ]);
+    const [sql, params] = db.execute.mock.calls[1];
+    expect(params).toEqual([users.sponsor.sponsor_id]);
+    expect(sql).toContain("status = 'approved'");
+    expect(sql).toContain('INTERVAL 6 DAY');
+  });
+
+  it('rejects non-sponsor accounts', async () => {
+    const agent = await signIn(app, users.driver);
+    db.execute.mockClear();
+    mockQueries([roleLookup]);
+
+    await agent.get('/api/sponsor/points/weekly').expect(403);
+    expect(db.execute).toHaveBeenCalledTimes(1);
+  });
+});

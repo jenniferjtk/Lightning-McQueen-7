@@ -910,8 +910,8 @@ app.get('/api/points/trend', requireRole('driver'), async (req, res) => {
        FROM point_audit_log l
        JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
        WHERE l.affected_user_id = ?
-       GROUP BY date
-       ORDER BY date`,
+       GROUP BY DATE(l.timestamp)
+       ORDER BY DATE(l.timestamp)`,
       [req.currentUser.user_id],
     );
     let runningTotal = 0;

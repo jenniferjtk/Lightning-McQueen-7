@@ -187,6 +187,7 @@ export default function SponsorDriversPage({ user }) {
                     key={`${selectedDriver.id}-${pointHistoryVersion}`}
                     endpoint={`/api/sponsor/drivers/${selectedDriver.id}/points/trend`}
                     title={`Point history for ${selectedDriver.firstName} ${selectedDriver.lastName}`}
+                    fallbackError={`Unable to load ${selectedDriver.firstName} ${selectedDriver.lastName}'s point history.`}
                   />
                 </div>
               )}
