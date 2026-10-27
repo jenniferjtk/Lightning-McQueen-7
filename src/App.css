@@ -132,6 +132,10 @@ body {
   align-items: stretch;
 }
 
+.dashboard__top--sponsor {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .dashboard__points-column,
 .dashboard__profile-column {
   display: flex;
@@ -201,6 +205,75 @@ body {
 
 .points-activity-card__amount--negative {
   color: #b44738;
+}
+
+.point-change-report {
+  flex-basis: 100%;
+}
+
+.points-activity-card__item {
+  flex-wrap: wrap;
+}
+
+.point-change-report__toggle,
+.point-change-report__actions button {
+  border: 0;
+  border-radius: 4px;
+  background: var(--color-asphalt);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 0.55rem 0.7rem;
+}
+
+.point-change-report__toggle:hover,
+.point-change-report__actions button:hover {
+  background: var(--color-steel);
+}
+
+.point-change-report__form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  color: var(--color-slate);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.point-change-report__form textarea {
+  border: 1px solid #c9c6bd;
+  border-radius: 4px;
+  font: inherit;
+  font-weight: 400;
+  min-height: 4.5rem;
+  padding: 0.6rem;
+  resize: vertical;
+  width: 100%;
+}
+
+.point-change-report__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.point-change-report__actions button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.point-change-report__submitted {
+  color: #256b42;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.point-change-report__error {
+  color: #a2382b;
+  font-size: 0.8rem;
+  margin: 0.4rem 0 0;
 }
 
 .balance-notifications-card {
@@ -710,6 +783,14 @@ body {
 .admin-sponsor-links__row button:disabled { cursor: wait; opacity: 0.65; }
 .admin-sponsor-links__state { color: var(--color-slate); font-size: 0.85rem; margin: 0.8rem 0 0; }
 .admin-sponsor-links__state--error { color: #a2382b; }
+
+.admin-point-reports { margin-top: 1.25rem; padding: 1.5rem; }
+.admin-point-reports .card__title { margin-bottom: 0.75rem; }
+.admin-point-reports__list { display: flex; flex-direction: column; }
+.admin-point-reports__item { border-top: 1px solid var(--color-line); padding: 1rem 0; }
+.admin-point-reports__item h3 { font-size: 0.95rem; margin: 0; }
+.admin-point-reports__item p { color: var(--color-slate); font-size: 0.85rem; margin: 0.4rem 0 0; }
+.admin-point-reports__item .admin-point-reports__details { color: var(--color-ink); white-space: pre-wrap; }
 
 .admin-action-card {
   background: var(--color-card);
@@ -1505,6 +1586,13 @@ body {
   margin-bottom: 1rem;
 }
 
+.driver-management__application-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
 .driver-management__application-heading h2 {
   margin: 0;
   font-size: 1.25rem;
@@ -1559,6 +1647,10 @@ body {
   margin-top: 1.25rem;
   padding-top: 1rem;
   border-top: 1px solid var(--color-line);
+}
+
+.driver-management__point-history {
+  margin-top: 1.25rem;
 }
 
 .driver-management__point-adjustment h3 {
