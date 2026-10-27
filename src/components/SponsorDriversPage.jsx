@@ -1,5 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import AdjustPointsForm from './AdjustPointsForm.jsx';
+import { PointsTrendChart } from './PointCharts.jsx';
+import PointChangeReportForm from './PointChangeReportForm.jsx';
+import BulkUserUpload from './BulkUserUpload.jsx';
 
 const SORT_OPTIONS = [
   { value: 'name-asc', label: 'Name (A to Z)' },
@@ -34,9 +37,15 @@ export default function SponsorDriversPage({ user }) {
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('name-asc');
   const [selectedDriverId, setSelectedDriverId] = useState(null);
+  const [pointHistoryVisible, setPointHistoryVisible] = useState(false);
+  const [pointHistoryVersion, setPointHistoryVersion] = useState(0);
   const [rules, setRules] = useState([]);
   const [rulesLoading, setRulesLoading] = useState(true);
   const [rulesError, setRulesError] = useState('');
+  const [pointEntries, setPointEntries] = useState([]);
+  const [pointEntriesLoading, setPointEntriesLoading] = useState(false);
+  const [pointEntriesError, setPointEntriesError] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     fetch('/api/sponsor/drivers', { credentials: 'include' })
@@ -49,7 +58,7 @@ export default function SponsorDriversPage({ user }) {
       })
       .catch((requestError) => setError(requestError.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [reloadKey]);
 
   useEffect(() => {
     fetch('/api/sponsor-rules', { credentials: 'include' })
@@ -63,6 +72,32 @@ export default function SponsorDriversPage({ user }) {
       .catch((requestError) => setRulesError(requestError.message))
       .finally(() => setRulesLoading(false));
   }, [user?.sponsorId]);
+
+  useEffect(() => {
+    if (!selectedDriverId || !pointHistoryVisible) return;
+    let isCurrent = true;
+    setPointEntriesLoading(true);
+    setPointEntriesError('');
+    fetch(`/api/sponsor/drivers/${selectedDriverId}/points/entries`, { credentials: 'include' })
+      .then(async (response) => {
+        let data;
+        try {
+          data = await response.json();
+        } catch {
+          throw new Error('The point changes API returned a non-JSON response. Restart the backend or deploy the latest API version.');
+        }
+        if (!response.ok) throw new Error(data.message || 'Unable to load point changes.');
+        if (!Array.isArray(data.entries)) throw new Error('Unable to load point changes.');
+        if (isCurrent) setPointEntries(data.entries);
+      })
+      .catch((requestError) => {
+        if (isCurrent) setPointEntriesError(requestError.message);
+      })
+      .finally(() => {
+        if (isCurrent) setPointEntriesLoading(false);
+      });
+    return () => { isCurrent = false; };
+  }, [selectedDriverId, pointHistoryVisible, pointHistoryVersion]);
 
   const visibleDrivers = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
@@ -88,6 +123,10 @@ export default function SponsorDriversPage({ user }) {
         <h1>Driver management.</h1>
         <p>Find drivers in your organization and review their current point balances.</p>
       </section>
+
+      {!loading && !error && sponsorLinked && (
+        <BulkUserUpload onCreated={() => setReloadKey((key) => key + 1)} />
+      )}
 
       {loading ? (
         <p className="driver-management-page__message">Loading drivers...</p>
@@ -128,7 +167,25 @@ export default function SponsorDriversPage({ user }) {
                   <p className="driver-management__application-eyebrow">Driver application</p>
                   <h2>{selectedDriver.firstName} {selectedDriver.lastName}</h2>
                 </div>
-                <button type="button" onClick={() => setSelectedDriverId(null)}>Close application</button>
+                <div className="driver-management__application-actions">
+                  <button
+                    type="button"
+                    aria-expanded={pointHistoryVisible}
+                    aria-controls="driver-point-history"
+                    onClick={() => setPointHistoryVisible((visible) => !visible)}
+                  >
+                    {pointHistoryVisible ? 'Hide point history' : 'Show point history'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedDriverId(null);
+                      setPointHistoryVisible(false);
+                    }}
+                  >
+                    Close application
+                  </button>
+                </div>
               </div>
               <dl className="driver-management__application-details">
                 <div>
@@ -160,6 +217,43 @@ export default function SponsorDriversPage({ user }) {
                   <dd>{pointValue(selectedDriver).toLocaleString()}</dd>
                 </div>
               </dl>
+              {pointHistoryVisible && (
+                <>
+                  <div className="driver-management__point-history" id="driver-point-history">
+                    <PointsTrendChart
+                      key={`${selectedDriver.id}-${pointHistoryVersion}`}
+                      endpoint={`/api/sponsor/drivers/${selectedDriver.id}/points/trend`}
+                      title={`Point history for ${selectedDriver.firstName} ${selectedDriver.lastName}`}
+                      fallbackError={`Unable to load ${selectedDriver.firstName} ${selectedDriver.lastName}'s point history.`}
+                    />
+                  </div>
+                  <section className="driver-management__point-entries" aria-label="Recent point changes">
+                    <h3>Recent point changes</h3>
+                    {pointEntriesLoading ? (
+                      <p className="driver-management-page__message">Loading point changes...</p>
+                    ) : pointEntriesError ? (
+                      <p className="driver-management-page__message" role="alert">{pointEntriesError}</p>
+                    ) : pointEntries.length === 0 ? (
+                      <p className="driver-management-page__message">No point changes to review.</p>
+                    ) : (
+                      <ul className="points-activity-card__list">
+                        {pointEntries.map((entry) => (
+                          <li key={entry.id} className="points-activity-card__item">
+                            <div>
+                              <p className="points-activity-card__label">{entry.label}</p>
+                              <p className="points-activity-card__date">{entry.date}</p>
+                            </div>
+                            <span className={entry.amount >= 0 ? 'points-activity-card__amount points-activity-card__amount--positive' : 'points-activity-card__amount points-activity-card__amount--negative'}>
+                              {entry.amount >= 0 ? '+' : '-'}{Math.abs(entry.amount).toLocaleString()} pts
+                            </span>
+                            <PointChangeReportForm entry={entry} />
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </section>
+                </>
+              )}
               <div className="driver-management__point-adjustment">
                 <h3>Adjust points</h3>
                 {rulesLoading ? (
@@ -176,6 +270,7 @@ export default function SponsorDriversPage({ user }) {
                           ? { ...driver, points: pointValue(driver) + changeAmount }
                           : driver
                       )));
+                      setPointHistoryVersion((version) => version + 1);
                     }}
                   />
                 )}
@@ -209,7 +304,10 @@ export default function SponsorDriversPage({ user }) {
                           type="button"
                           className="driver-management__view-application"
                           aria-pressed={selectedDriverId === driver.id}
-                          onClick={() => setSelectedDriverId(driver.id)}
+                          onClick={() => {
+                            setSelectedDriverId(driver.id);
+                            setPointHistoryVisible(false);
+                          }}
                         >
                           {selectedDriverId === driver.id ? 'Viewing application' : 'View application'}
                         </button>

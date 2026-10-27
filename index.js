@@ -76,6 +76,28 @@ const adminDriver = (user) => ({
 
 const validEmail = (email) => typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
+// Shared by every route that creates an account (admin create, sponsor bulk
+// upload), so they all enforce the same rules. Returns an error message, or
+// null when the fields are valid.
+const newUserError = ({ email, password, firstName, lastName, role }, allowedRoles) => {
+  if (!allowedRoles.includes(role)) {
+    const roleList = allowedRoles.length > 2
+      ? `${allowedRoles.slice(0, -1).join(', ')}, or ${allowedRoles.at(-1)}`
+      : allowedRoles.join(' or ');
+    return `Choose a ${roleList} role.`;
+  }
+  if (!validEmail(email) || typeof password !== 'string' || !password ||
+      typeof firstName !== 'string' || !firstName.trim() ||
+      typeof lastName !== 'string' || !lastName.trim()) {
+    return 'A first name, last name, valid email, and password are required.';
+  }
+  if (password.length < 8) return 'Password must be at least 8 characters.';
+  if (Buffer.byteLength(password, 'utf8') > 72) return 'Password must be 72 bytes or fewer.';
+  return null;
+};
+
+const hashPassword = (password) => bcrypt.hash(password, 12);
+
 const requireRuleManager = async (req, res, next) => {
   if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
   try {
@@ -271,6 +293,26 @@ app.post('/api/auth/logout', (req, res) => {
   req.session.destroy(() => res.status(204).end());
 });
 
+app.get('/api/admin/point-change-reports', requireAdmin, async (req, res) => {
+  try {
+    const [reports] = await pool.execute(
+      `SELECT r.report_id AS id, r.reporter_role AS reporterRole,
+              r.description, r.pt_value AS amount, r.details,
+              DATE_FORMAT(r.created_at, '%b %e, %Y') AS date,
+              CONCAT(driver.first_name, ' ', driver.last_name) AS driverName,
+              CONCAT(reporter.first_name, ' ', reporter.last_name) AS reporterName
+       FROM point_change_reports r
+       LEFT JOIN users driver ON driver.user_id = r.affected_user_id
+       LEFT JOIN users reporter ON reporter.user_id = r.reporter_id
+       ORDER BY r.created_at DESC, r.report_id DESC`,
+    );
+    return res.json({ reports: reports.map((report) => ({ ...report, amount: Number(report.amount) })) });
+  } catch (error) {
+    console.error('Point-change report list failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load point-change reports.' });
+  }
+});
+
 app.get('/api/admin/drivers', requireAdmin, async (req, res) => {
   try {
     const [rows] = await pool.execute(
@@ -424,20 +466,10 @@ app.get('/api/admin/sponsor-applications', requireAdmin, async (req, res) => {
 
 app.post('/api/admin/users', requireAdmin, async (req, res) => {
   const { email, password, firstName, lastName, role } = req.body || {};
-  if (!['driver', 'admin', 'sponsor'].includes(role)) {
-    return res.status(400).json({ message: 'Choose a driver, admin, or sponsor role.' });
-  }
-  if (!validEmail(email) || typeof password !== 'string' || !password ||
-      typeof firstName !== 'string' || !firstName.trim() ||
-      typeof lastName !== 'string' || !lastName.trim()) {
-    return res.status(400).json({ message: 'A first name, last name, valid email, and password are required.' });
-  }
-  if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters.' });
-  if (Buffer.byteLength(password, 'utf8') > 72) {
-    return res.status(400).json({ message: 'Password must be 72 bytes or fewer.' });
-  }
+  const validationError = newUserError({ email, password, firstName, lastName, role }, ['driver', 'admin', 'sponsor']);
+  if (validationError) return res.status(400).json({ message: validationError });
   try {
-    const passwordHash = await bcrypt.hash(password, 12);
+    const passwordHash = await hashPassword(password);
     const [result] = await pool.execute(
       `INSERT INTO users (email, password_hash, role, first_name, last_name, created_at)
        VALUES (?, ?, ?, ?, ?, NOW())`,
@@ -934,8 +966,8 @@ app.get('/api/points/trend', requireRole('driver'), async (req, res) => {
        FROM point_audit_log l
        JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
        WHERE l.affected_user_id = ?
-       GROUP BY date
-       ORDER BY date`,
+       GROUP BY DATE_FORMAT(l.timestamp, '%Y-%m-%d')
+       ORDER BY DATE_FORMAT(l.timestamp, '%Y-%m-%d')`,
       [req.currentUser.user_id],
     );
     let runningTotal = 0;
@@ -946,6 +978,169 @@ app.get('/api/points/trend', requireRole('driver'), async (req, res) => {
   } catch (error) {
     console.error('Point trend lookup failed:', error.message);
     return res.status(500).json({ message: 'Unable to load your point history.' });
+  }
+});
+
+app.get('/api/sponsor/drivers/:driverUserId/points/trend', requireRole('sponsor'), async (req, res) => {
+  const driverUserId = Number(req.params.driverUserId);
+  if (!Number.isSafeInteger(driverUserId) || driverUserId < 1) {
+    return res.status(400).json({ message: 'Invalid driver account.' });
+  }
+
+  try {
+    const [approved] = await pool.execute(
+      "SELECT application_id FROM driver_applications WHERE driver_user_id = ? AND sponsor_id = ? AND status = 'approved'",
+      [driverUserId, req.currentUser.sponsor_id],
+    );
+    if (!approved[0]) return res.status(403).json({ message: 'This driver is not in your sponsor program.' });
+
+    const [rows] = await pool.execute(
+      `SELECT DATE_FORMAT(l.timestamp, '%Y-%m-%d') AS date, SUM(r.pt_value) AS change_amount
+       FROM point_audit_log l
+       JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+       WHERE l.affected_user_id = ?
+       GROUP BY DATE_FORMAT(l.timestamp, '%Y-%m-%d')
+       ORDER BY DATE_FORMAT(l.timestamp, '%Y-%m-%d')`,
+      [driverUserId],
+    );
+    let runningTotal = 0;
+    return res.json(rows.map((row) => {
+      runningTotal += Number(row.change_amount);
+      return { date: row.date, cumulative_total: runningTotal };
+    }));
+  } catch (error) {
+    console.error('Sponsor driver point trend lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load point history.' });
+  }
+});
+
+app.get('/api/sponsor/drivers/:driverUserId/points/entries', requireRole('sponsor'), async (req, res) => {
+  const driverUserId = Number(req.params.driverUserId);
+  if (!Number.isSafeInteger(driverUserId) || driverUserId < 1) {
+    return res.status(400).json({ message: 'Invalid driver account.' });
+  }
+
+  try {
+    const [approved] = await pool.execute(
+      "SELECT application_id FROM driver_applications WHERE driver_user_id = ? AND sponsor_id = ? AND status = 'approved'",
+      [driverUserId, req.currentUser.sponsor_id],
+    );
+    if (!approved[0]) return res.status(403).json({ message: 'This driver is not in your sponsor program.' });
+
+    const [rows] = await pool.execute(
+      `SELECT l.log_id AS id, r.description AS label, r.pt_value AS amount,
+              DATE_FORMAT(l.timestamp, '%b %e, %Y') AS date
+       FROM point_audit_log l
+       JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+       WHERE l.affected_user_id = ?
+       ORDER BY l.timestamp DESC, l.log_id DESC
+       LIMIT 20`,
+      [driverUserId],
+    );
+    return res.json({
+      entries: rows.map((entry) => ({ ...entry, amount: Number(entry.amount) })),
+    });
+  } catch (error) {
+    console.error('Sponsor driver point entries lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load point changes.' });
+  }
+});
+
+app.get('/api/sponsor/points/weekly', requireRole('sponsor'), async (req, res) => {
+  try {
+    const [[{ today }]] = await pool.execute(
+      "SELECT DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS today",
+    );
+    const [rows] = await pool.execute(
+      `SELECT DATE_FORMAT(l.timestamp, '%Y-%m-%d') AS date,
+              SUM(CASE WHEN r.pt_value > 0 THEN r.pt_value ELSE 0 END) AS gains,
+              SUM(CASE WHEN r.pt_value < 0 THEN r.pt_value ELSE 0 END) AS losses
+       FROM point_audit_log l
+       JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+       WHERE l.affected_user_id IN (
+         SELECT driver_user_id
+         FROM driver_applications
+         WHERE sponsor_id = ? AND status = 'approved'
+       )
+         AND l.timestamp >= CURDATE() - INTERVAL 6 DAY
+         AND l.timestamp < CURDATE() + INTERVAL 1 DAY
+       GROUP BY DATE_FORMAT(l.timestamp, '%Y-%m-%d')
+       ORDER BY DATE_FORMAT(l.timestamp, '%Y-%m-%d')`,
+      [req.currentUser.sponsor_id],
+    );
+    const changesByDate = new Map(rows.map((row) => [row.date, row]));
+    const lastDate = new Date(`${today}T00:00:00Z`);
+    const week = Array.from({ length: 7 }, (_, index) => {
+      const day = new Date(lastDate);
+      day.setUTCDate(lastDate.getUTCDate() - 6 + index);
+      const date = day.toISOString().slice(0, 10);
+      const changes = changesByDate.get(date);
+      return {
+        date,
+        gains: Number(changes?.gains ?? 0),
+        losses: Number(changes?.losses ?? 0),
+      };
+    });
+    return res.json(week);
+  } catch (error) {
+    console.error('Sponsor weekly point history lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load weekly sponsor point changes.' });
+  }
+});
+
+app.post('/api/point-change-reports', requireRole('driver', 'sponsor'), async (req, res) => {
+  const pointLogId = Number(req.body?.pointLogId);
+  const details = typeof req.body?.details === 'string' ? req.body.details.trim() : '';
+  if (!Number.isSafeInteger(pointLogId) || pointLogId < 1) {
+    return res.status(400).json({ message: 'Choose a valid point change.' });
+  }
+  if (!details || details.length > 1000) {
+    return res.status(400).json({ message: 'Explain what looks suspicious (up to 1000 characters).' });
+  }
+
+  try {
+    const [entries] = await pool.execute(
+      `SELECT l.log_id, l.affected_user_id, r.description, r.pt_value
+       FROM point_audit_log l
+       JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+       WHERE l.log_id = ?`,
+      [pointLogId],
+    );
+    const entry = entries[0];
+    if (!entry) return res.status(404).json({ message: 'That point change could not be found.' });
+
+    if (req.currentUser.role === 'driver' && Number(entry.affected_user_id) !== Number(req.currentUser.user_id)) {
+      return res.status(403).json({ message: 'You can only report changes to your own points.' });
+    }
+    if (req.currentUser.role === 'sponsor') {
+      const [approved] = await pool.execute(
+        "SELECT application_id FROM driver_applications WHERE driver_user_id = ? AND sponsor_id = ? AND status = 'approved'",
+        [entry.affected_user_id, req.currentUser.sponsor_id],
+      );
+      if (!approved[0]) return res.status(403).json({ message: 'This driver is not in your sponsor program.' });
+    }
+
+    const [result] = await pool.execute(
+      `INSERT INTO point_change_reports
+         (reporter_id, reporter_role, point_log_id, affected_user_id, description, pt_value, details)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        req.currentUser.user_id,
+        req.currentUser.role,
+        entry.log_id,
+        entry.affected_user_id,
+        entry.description || 'Point adjustment',
+        entry.pt_value,
+        details,
+      ],
+    );
+    return res.status(201).json({ reportId: result.insertId });
+  } catch (error) {
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ message: 'You have already reported this point change.' });
+    }
+    console.error('Point-change report submission failed:', error.message);
+    return res.status(500).json({ message: 'Unable to submit your report.' });
   }
 });
 
@@ -1255,10 +1450,24 @@ app.get('/api/sponsors/:sponsorId/catalog', requireRole('driver', 'sponsor', 'ad
        ORDER BY COALESCE(sc.category_tag, p.category), p.title`,
       [req.catalogSponsorId],
     );
+    // A driver's points are earned per sponsor (each rule belongs to one), so
+    // the balance shown beside a catalog only counts this sponsor's rules.
+    let pointBalance = null;
+    if (req.currentUser.role === 'driver') {
+      const [[balance]] = await pool.execute(
+        `SELECT COALESCE(SUM(r.pt_value), 0) AS points
+         FROM point_audit_log l
+         JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+         WHERE l.affected_user_id = ? AND r.sponsor_id = ?`,
+        [req.currentUser.user_id, req.catalogSponsorId],
+      );
+      pointBalance = Number(balance?.points || 0);
+    }
     return res.json({
       sponsorId: sponsors[0].sponsor_id,
       sponsorName: sponsors[0].name,
       pointConversionRate: Number(sponsors[0].point_conversion_rate),
+      pointBalance,
       products: rows.map((row) => sponsorCatalogProduct(row, sponsors[0].point_conversion_rate)),
       stale,
     });
@@ -1374,6 +1583,196 @@ app.get('/api/sponsors/:sponsorId/catalog/:productId/live', requireRole('driver'
     });
   } catch (error) {
     return sendCatalogError(res, error, 'Live product check failed', 'Unable to confirm this product right now.');
+  }
+});
+
+// Sponsor bulk user upload. A sponsor submits a CSV of drivers and sponsor
+// users for its own organization. Every row is normalized, then validated with
+// the same rules as single account creation; if any row is invalid, nothing is
+// written and every bad row is reported. Valid batches are inserted in one
+// transaction. bcrypt at cost 12 takes ~0.25s per row and the Lambda timeout
+// is 10s, which is what caps the batch size.
+const BULK_UPLOAD_MAX_ROWS = 15;
+const BULK_UPLOAD_COLUMNS = {
+  email: 'email',
+  firstname: 'firstName',
+  lastname: 'lastName',
+  role: 'role',
+  password: 'password',
+  sponsorid: 'sponsorId',
+};
+const BULK_UPLOAD_REQUIRED = ['email', 'firstName', 'lastName', 'role', 'password'];
+const BULK_UPLOAD_HEADERS = { email: 'email', firstName: 'first_name', lastName: 'last_name', role: 'role', password: 'password' };
+
+// Minimal RFC 4180 parsing: comma separated, double-quoted fields may contain
+// commas and line breaks, "" inside quotes is a literal quote, CRLF or LF.
+const parseCsv = (text) => {
+  const records = [];
+  let record = [];
+  let field = '';
+  let quoted = false;
+  const input = text.replace(/^﻿/, '');
+  for (let i = 0; i < input.length; i += 1) {
+    const character = input[i];
+    if (quoted) {
+      if (character !== '"') field += character;
+      else if (input[i + 1] === '"') {
+        field += '"';
+        i += 1;
+      } else quoted = false;
+    } else if (character === '"' && field === '') {
+      quoted = true;
+    } else if (character === ',') {
+      record.push(field);
+      field = '';
+    } else if (character === '\n' || character === '\r') {
+      if (character === '\r' && input[i + 1] === '\n') i += 1;
+      record.push(field);
+      records.push(record);
+      record = [];
+      field = '';
+    } else {
+      field += character;
+    }
+  }
+  if (quoted) return { error: 'The file has a quoted value that is never closed.' };
+  if (field !== '' || record.length) {
+    record.push(field);
+    records.push(record);
+  }
+  return { records };
+};
+
+// Uniform formatting for every row: values are trimmed and blank cells become
+// NULL; emails and roles are lowercased; runs of spaces in names collapse.
+// Passwords are kept exactly as typed (only a blank one becomes NULL), since
+// silently changing a password would lock the user out.
+const normalizeBulkUser = (values) => {
+  const clean = (value) => {
+    const trimmed = typeof value === 'string' ? value.trim() : '';
+    return trimmed === '' ? null : trimmed;
+  };
+  const name = (value) => clean(value)?.replace(/\s+/g, ' ') ?? null;
+  return {
+    email: clean(values.email)?.toLowerCase() ?? null,
+    firstName: name(values.firstName),
+    lastName: name(values.lastName),
+    role: clean(values.role)?.toLowerCase() ?? null,
+    password: typeof values.password === 'string' && values.password.trim() !== '' ? values.password : null,
+    sponsorId: clean(values.sponsorId),
+  };
+};
+
+app.post('/api/sponsor/users/bulk', requireRole('sponsor'), async (req, res) => {
+  const csv = req.body?.csv;
+  if (typeof csv !== 'string' || !csv.trim()) {
+    return res.status(400).json({ message: 'Upload a CSV file with a header row and at least one user.' });
+  }
+
+  const { records, error: parseError } = parseCsv(csv);
+  if (parseError) return res.status(400).json({ message: parseError });
+
+  const header = records[0].map((name) => name.trim().toLowerCase().replace(/[\s_-]/g, ''));
+  // Blank header cells (e.g. trailing commas from a spreadsheet export) are ignored.
+  const unknown = records[0].filter((name, index) => header[index] && !BULK_UPLOAD_COLUMNS[header[index]]);
+  const fields = header.map((name) => BULK_UPLOAD_COLUMNS[name]);
+  const missing = BULK_UPLOAD_REQUIRED.filter((field) => !fields.includes(field));
+  if (unknown.length || missing.length) {
+    return res.status(400).json({
+      message: [
+        missing.length && `Missing column(s): ${missing.map((field) => BULK_UPLOAD_HEADERS[field]).join(', ')}.`,
+        unknown.length && `Unknown column(s): ${unknown.join(', ')}.`,
+        'Expected columns: email, first_name, last_name, role, password (sponsor_id optional).',
+      ].filter(Boolean).join(' '),
+    });
+  }
+
+  // Row numbers match the spreadsheet: the header is row 1. Blank lines are skipped.
+  const rows = records
+    .map((values, index) => ({ row: index + 1, values }))
+    .slice(1)
+    .filter(({ values }) => values.some((value) => value.trim() !== ''))
+    .map(({ row, values }) => ({
+      row,
+      user: normalizeBulkUser(Object.fromEntries(fields.map((field, index) => [field, values[index]]))),
+    }));
+  if (!rows.length) return res.status(400).json({ message: 'The file has no users in it.' });
+  if (rows.length > BULK_UPLOAD_MAX_ROWS) {
+    return res.status(400).json({ message: `Upload at most ${BULK_UPLOAD_MAX_ROWS} users at a time (this file has ${rows.length}).` });
+  }
+
+  const sponsorId = Number(req.currentUser.sponsor_id);
+  const errors = [];
+  const seenEmails = new Set();
+  for (const { row, user } of rows) {
+    const rowError = newUserError(user, ['driver', 'sponsor']);
+    if (rowError) errors.push({ row, email: user.email, message: rowError });
+    else if (user.sponsorId !== null && Number(user.sponsorId) !== sponsorId) {
+      errors.push({ row, email: user.email, message: 'Users can only be added to your own sponsor organization.' });
+    } else if (seenEmails.has(user.email)) {
+      errors.push({ row, email: user.email, message: 'This email appears more than once in the file.' });
+    }
+    if (user.email) seenEmails.add(user.email);
+  }
+
+  try {
+    const emails = [...seenEmails];
+    if (emails.length) {
+      const [existing] = await pool.execute(
+        `SELECT email FROM users WHERE email IN (${emails.map(() => '?').join(', ')})`,
+        emails,
+      );
+      const taken = new Set(existing.map((user) => user.email.toLowerCase()));
+      for (const { row, user } of rows) {
+        if (taken.has(user.email) && !errors.some((error) => error.row === row)) {
+          errors.push({ row, email: user.email, message: 'An account with this email already exists.' });
+        }
+      }
+    }
+    if (errors.length) {
+      return res.status(400).json({
+        message: 'No users were created. Fix the rows below and upload the file again.',
+        errors: errors.sort((left, right) => left.row - right.row),
+      });
+    }
+
+    const hashed = [];
+    for (const { row, user } of rows) hashed.push({ row, user, passwordHash: await hashPassword(user.password) });
+
+    const connection = await pool.getConnection();
+    const created = [];
+    try {
+      await connection.beginTransaction();
+      for (const { row, user, passwordHash } of hashed) {
+        const [result] = await connection.execute(
+          `INSERT INTO users (email, password_hash, role, first_name, last_name, sponsor_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+          [user.email, passwordHash, user.role, user.firstName, user.lastName, user.role === 'sponsor' ? sponsorId : null],
+        );
+        // Drivers join the uploading sponsor's program the same way an approved
+        // application would leave them.
+        if (user.role === 'driver') {
+          await connection.execute(
+            "INSERT INTO driver_applications (driver_user_id, sponsor_id, status, decided_at) VALUES (?, ?, 'approved', NOW())",
+            [result.insertId, sponsorId],
+          );
+        }
+        created.push({ row, id: result.insertId, email: user.email, role: user.role, firstName: user.firstName, lastName: user.lastName });
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+    return res.status(201).json({ created, count: created.length });
+  } catch (error) {
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ message: 'One of these emails was registered while uploading. No users were created; please upload again.' });
+    }
+    console.error('Bulk user upload failed:', error.message);
+    return res.status(500).json({ message: 'Unable to create these users. No users were created.' });
   }
 });
 

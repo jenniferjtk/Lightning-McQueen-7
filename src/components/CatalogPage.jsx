@@ -132,6 +132,16 @@ export default function CatalogPage({ sponsors = [], userId }) {
           )}
         </div>
 
+        {activeSponsor && catalog.status === 'ready' && (
+          <div className="catalog-balance" aria-label="Your point balance">
+            <span>Your balance with {catalog.data.sponsorName}</span>
+            <strong>{balance === null ? '—' : `${balance.toLocaleString()} pts`}</strong>
+          </div>
+        )}
+        {catalog.data?.stale && (
+          <p className="catalog-message" role="status">Some reward details may be out of date while the product provider is unavailable.</p>
+        )}
+
         <div
           id="catalog-sponsor-panel"
           role={sponsors.length > 1 ? 'tabpanel' : undefined}

@@ -12,8 +12,13 @@ import AdminHomePage from './components/AdminHomePage.jsx';
 import AdminDriversPage from './components/AdminDriversPage.jsx';
 import SponsorConversionCard from './components/SponsorConversionCard.jsx';
 import SponsorApplicationsPage from './components/SponsorApplicationsPage.jsx';
+import SponsorDriversPage from './components/SponsorDriversPage.jsx';
+import PointChangeReportForm from './components/PointChangeReportForm.jsx';
+import {
+  PointsGainedChart, PointsLostChart, PointsTrendChart, SponsorWeeklyPointsChart,
+} from './components/PointCharts.jsx';
+import SponsorCatalogPage from './components/SponsorCatalogPage.jsx';
 import CatalogPage from './components/CatalogPage.jsx';
-import { PointsGainedChart, PointsLostChart, PointsTrendChart } from './components/PointCharts.jsx';
 
 const emptyDriver = {
   name: '',
@@ -91,7 +96,7 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
-    if (!user) {
+    if (!user || user.role !== 'driver') {
       setDriverData(null);
       return;
     }
@@ -118,7 +123,7 @@ export default function App() {
   const isAdmin = user.role === 'admin';
   const adminPages = ['admin', 'drivers', 'user-log'];
   const isSponsor = user.role === 'sponsor';
-  const sponsorPages = ['sponsor-applications'];
+  const sponsorPages = ['sponsor-applications', 'sponsor-drivers', 'sponsor-catalog'];
   const isPreview = Boolean(previewRole);
   const viewRole = previewRole || user.role;
   const visiblePage = isPreview
@@ -160,6 +165,10 @@ export default function App() {
         <AdminDriversPage />
       ) : visiblePage === 'sponsor-applications' ? (
         <SponsorApplicationsPage user={previewUser} onPendingCountChange={handlePendingCountChange} preview={isPreview} />
+      ) : visiblePage === 'sponsor-drivers' ? (
+        <SponsorDriversPage user={previewUser} />
+      ) : visiblePage === 'sponsor-catalog' ? (
+        <SponsorCatalogPage user={previewUser} />
       ) : visiblePage === 'about' ? (
         <AboutPage />
       ) : visiblePage === 'account' ? (
@@ -174,31 +183,36 @@ export default function App() {
         <MyApplicationPage user={previewUser} preview={isPreview} />
       ) : (
         <main className="dashboard">
-          <div className="dashboard__top">
-            <div className="dashboard__points-column">
-              <PointsCard points={driver.points} />
-              <SponsorConversionCard userRole={user.role} />
-              <section className="card points-activity-card">
-                <h2 className="card__title">Recent point updates</h2>
-                {driver.balanceNotifications.length === 0 ? (
-                  <p className="points-activity-card__empty">No recent point changes yet.</p>
-                ) : (
-                  <ul className="points-activity-card__list">
-                    {driver.balanceNotifications.map((entry) => (
-                      <li key={entry.id} className="points-activity-card__item">
-                        <div>
-                          <p className="points-activity-card__label">{entry.label}</p>
-                          <p className="points-activity-card__date">{entry.date}</p>
-                        </div>
-                        <span className={entry.amount >= 0 ? 'points-activity-card__amount points-activity-card__amount--positive' : 'points-activity-card__amount points-activity-card__amount--negative'}>
-                          {entry.amount >= 0 ? '+' : '-'}{Math.abs(entry.amount).toLocaleString()} pts
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
-            </div>
+          <div className={isSponsor ? 'dashboard__top dashboard__top--sponsor' : 'dashboard__top'}>
+            {isSponsor ? (
+              <SponsorWeeklyPointsChart />
+            ) : (
+              <>
+                <div className="dashboard__points-column">
+                  <PointsCard points={driver.points} />
+                  <SponsorConversionCard userRole={user.role} />
+                  <section className="card points-activity-card">
+                    <h2 className="card__title">Recent point updates</h2>
+                    {driver.balanceNotifications.length === 0 ? (
+                      <p className="points-activity-card__empty">No recent point changes yet.</p>
+                    ) : (
+                      <ul className="points-activity-card__list">
+                        {driver.balanceNotifications.map((entry) => (
+                          <li key={entry.id} className="points-activity-card__item">
+                            <div>
+                              <p className="points-activity-card__label">{entry.label}</p>
+                              <p className="points-activity-card__date">{entry.date}</p>
+                            </div>
+                            <span className={entry.amount >= 0 ? 'points-activity-card__amount points-activity-card__amount--positive' : 'points-activity-card__amount points-activity-card__amount--negative'}>
+                              {entry.amount >= 0 ? '+' : '-'}{Math.abs(entry.amount).toLocaleString()} pts
+                            </span>
+                            <PointChangeReportForm entry={entry} />
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </section>
+                </div>
 
             <div className="dashboard__profile-column">
               <ProfileCard
@@ -209,28 +223,30 @@ export default function App() {
                 sponsor={isPreview ? null : driver.sponsor}
               />
 
-              <section className="card balance-notifications-card">
-                <h2 className="card__title">Notifications</h2>
+                  <section className="card balance-notifications-card">
+                    <h2 className="card__title">Notifications</h2>
 
-                {driver.balanceNotifications.length === 0 ? (
-                  <p className="balance-notifications-card__empty">Your balance updates will appear here.</p>
-                ) : (
-                  <ul className="balance-notifications-card__list">
-                    {driver.balanceNotifications.map((entry) => (
-                      <li key={entry.id} className="balance-notifications-card__item">
-                        <div>
-                          <p className="balance-notifications-card__label">{entry.label}</p>
-                          <p className="balance-notifications-card__date">{entry.date}</p>
-                        </div>
-                        <span className={entry.amount >= 0 ? 'balance-notifications-card__amount balance-notifications-card__amount--positive' : 'balance-notifications-card__amount balance-notifications-card__amount--negative'}>
-                          {entry.amount >= 0 ? '+' : '-'}{Math.abs(entry.amount).toLocaleString()} pts
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
-            </div>
+                    {driver.balanceNotifications.length === 0 ? (
+                      <p className="balance-notifications-card__empty">Your balance updates will appear here.</p>
+                    ) : (
+                      <ul className="balance-notifications-card__list">
+                        {driver.balanceNotifications.map((entry) => (
+                          <li key={entry.id} className="balance-notifications-card__item">
+                            <div>
+                              <p className="balance-notifications-card__label">{entry.label}</p>
+                              <p className="balance-notifications-card__date">{entry.date}</p>
+                            </div>
+                            <span className={entry.amount >= 0 ? 'balance-notifications-card__amount balance-notifications-card__amount--positive' : 'balance-notifications-card__amount balance-notifications-card__amount--negative'}>
+                              {entry.amount >= 0 ? '+' : '-'}{Math.abs(entry.amount).toLocaleString()} pts
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </section>
+                </div>
+              </>
+            )}
           </div>
 
           {user.role === 'driver' && (

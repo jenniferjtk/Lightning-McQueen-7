@@ -5,6 +5,13 @@
 // Every function here resolves to products in our own shape (mapProduct) or
 // throws a CatalogProviderError, so swapping providers later means replacing
 // this file and keeping the same exports.
+//
+// Fake Store's CDN (Cloudflare) answers requests from AWS with 403, so the
+// deployed Lambda can't reach it. When the provider refuses us that way, the
+// functions below answer from fakeStoreSnapshot.js, a committed copy of its
+// static product list. Other failures (timeouts, 5xx, bad data) still throw.
+
+import SNAPSHOT from './fakeStoreSnapshot.js';
 
 const BASE_URL = process.env.FAKESTORE_BASE_URL || 'https://fakestoreapi.com';
 const TIMEOUT_MS = 5000;
@@ -49,6 +56,17 @@ async function getJson(path) {
     throw new CatalogProviderError('The catalog provider could not be reached.', { cause: error });
   }
   if (!response.ok) {
+    // Logged so CloudWatch shows whether a refusal came from the provider's
+    // CDN (Cloudflare sets cf-mitigated on challenges) or the provider itself.
+    const body = await response.text().catch(() => '');
+    console.warn('Catalog provider refused request', JSON.stringify({
+      path,
+      status: response.status,
+      server: response.headers.get('server'),
+      cfRay: response.headers.get('cf-ray'),
+      cfMitigated: response.headers.get('cf-mitigated'),
+      body: body.slice(0, 200),
+    }));
     throw new CatalogProviderError(`The catalog provider responded with status ${response.status}.`, { status: response.status });
   }
   const text = await response.text();
@@ -60,8 +78,22 @@ async function getJson(path) {
   }
 }
 
+const isRefusal = (error) => error instanceof CatalogProviderError && error.status === 403;
+
+// Calls getJson, answering from the snapshot instead when the provider
+// refuses the request.
+async function getJsonOrSnapshot(path, fromSnapshot) {
+  try {
+    return await getJson(path);
+  } catch (error) {
+    if (!isRefusal(error)) throw error;
+    console.warn(`Catalog provider refused ${path}; serving the bundled snapshot.`);
+    return fromSnapshot();
+  }
+}
+
 export async function fetchProducts() {
-  const body = await getJson('/products');
+  const body = await getJsonOrSnapshot('/products', () => SNAPSHOT);
   if (!Array.isArray(body)) throw new CatalogProviderError('The catalog provider returned an unexpected product list.');
   return body.map(mapProduct);
 }
@@ -70,7 +102,10 @@ export async function fetchProducts() {
 // unknown id with 200 and an empty body rather than a 404.
 export async function fetchProduct(productId) {
   try {
-    const body = await getJson(`/products/${encodeURIComponent(productId)}`);
+    const body = await getJsonOrSnapshot(
+      `/products/${encodeURIComponent(productId)}`,
+      () => SNAPSHOT.find((product) => product.id === Number(productId)) ?? null,
+    );
     return body ? mapProduct(body) : null;
   } catch (error) {
     if (error.status === 404) return null;
@@ -79,7 +114,10 @@ export async function fetchProduct(productId) {
 }
 
 export async function fetchCategories() {
-  const body = await getJson('/products/categories');
+  const body = await getJsonOrSnapshot(
+    '/products/categories',
+    () => [...new Set(SNAPSHOT.map((product) => product.category))],
+  );
   if (!Array.isArray(body) || !body.every((category) => typeof category === 'string')) {
     throw new CatalogProviderError('The catalog provider returned an unexpected category list.');
   }

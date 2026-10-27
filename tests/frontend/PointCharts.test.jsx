@@ -3,7 +3,7 @@ import React from 'react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';
 import {
-  LOSSES_REFRESH_MS, PointsGainedChart, PointsLostChart, PointsTrendChart,
+  LOSSES_REFRESH_MS, POINTS_REFRESH_MS, PointsGainedChart, PointsLostChart, PointsTrendChart, SponsorWeeklyPointsChart,
 } from '../../src/components/PointCharts.jsx';
 
 const mockFetch = (status, body) => {
@@ -61,6 +61,17 @@ describe('point charts', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Unable to load your point history.');
   });
 
+  it('shows endpoint-specific errors for the earnings and trend charts', async () => {
+    mockFetch(500, {});
+    const { rerender } = render(<PointsGainedChart />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Unable to load your points earned.');
+
+    vi.mocked(fetch).mockClear();
+    rerender(<PointsTrendChart />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Unable to load your point history.');
+    expect(fetch).toHaveBeenCalledWith('/api/points/trend', { credentials: 'include' });
+  });
+
   it('re-fetches the losses chart on an interval and stops after unmount', async () => {
     vi.useFakeTimers();
     mockFetch(200, []);
@@ -76,13 +87,48 @@ describe('point charts', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
-  it('does not poll the gains chart', async () => {
+  it.each([
+    ['gains', PointsGainedChart],
+    ['trend', PointsTrendChart],
+  ])('re-fetches the %s chart and stops after unmount', async (_, Chart) => {
     vi.useFakeTimers();
     mockFetch(200, []);
 
-    render(<PointsGainedChart />);
-    await act(async () => { await vi.advanceTimersByTimeAsync(LOSSES_REFRESH_MS * 3); });
-
+    const { unmount } = render(<Chart />);
     expect(fetch).toHaveBeenCalledTimes(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(POINTS_REFRESH_MS); });
+    expect(fetch).toHaveBeenCalledTimes(2);
+
+    unmount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(POINTS_REFRESH_MS * 3); });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('loads the sponsor aggregate chart from the weekly point changes endpoint', async () => {
+    mockFetch(200, [
+      { date: '2026-10-21', gains: 0, losses: 0 },
+      { date: '2026-10-22', gains: 50, losses: -30 },
+      { date: '2026-10-23', gains: 0, losses: -5 },
+      { date: '2026-10-24', gains: 0, losses: 0 },
+      { date: '2026-10-25', gains: 15, losses: 0 },
+      { date: '2026-10-26', gains: 0, losses: 0 },
+      { date: '2026-10-27', gains: 10, losses: 0 },
+    ]);
+
+    render(<SponsorWeeklyPointsChart />);
+
+    expect(screen.getByRole('heading', { name: 'Your drivers’ point changes over the last 7 days' })).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith('/api/sponsor/points/weekly', { credentials: 'include' });
+    await screen.findByLabelText('Your drivers’ point changes over the last 7 days');
+  });
+
+  it('uses an organization-specific error when the sponsor endpoint fails without a message', async () => {
+    mockFetch(500, {});
+
+    render(<SponsorWeeklyPointsChart />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent("Unable to load your drivers' point changes.");
+    expect(fetch).toHaveBeenCalledWith('/api/sponsor/points/weekly', { credentials: 'include' });
   });
 });
