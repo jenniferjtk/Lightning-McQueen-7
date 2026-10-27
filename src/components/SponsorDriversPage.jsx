@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import AdjustPointsForm from './AdjustPointsForm.jsx';
+import { PointsTrendChart } from './PointCharts.jsx';
 
 const SORT_OPTIONS = [
   { value: 'name-asc', label: 'Name (A to Z)' },
@@ -34,6 +35,8 @@ export default function SponsorDriversPage({ user }) {
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('name-asc');
   const [selectedDriverId, setSelectedDriverId] = useState(null);
+  const [pointHistoryVisible, setPointHistoryVisible] = useState(false);
+  const [pointHistoryVersion, setPointHistoryVersion] = useState(0);
   const [rules, setRules] = useState([]);
   const [rulesLoading, setRulesLoading] = useState(true);
   const [rulesError, setRulesError] = useState('');
@@ -128,7 +131,25 @@ export default function SponsorDriversPage({ user }) {
                   <p className="driver-management__application-eyebrow">Driver application</p>
                   <h2>{selectedDriver.firstName} {selectedDriver.lastName}</h2>
                 </div>
-                <button type="button" onClick={() => setSelectedDriverId(null)}>Close application</button>
+                <div className="driver-management__application-actions">
+                  <button
+                    type="button"
+                    aria-expanded={pointHistoryVisible}
+                    aria-controls="driver-point-history"
+                    onClick={() => setPointHistoryVisible((visible) => !visible)}
+                  >
+                    {pointHistoryVisible ? 'Hide point history' : 'Show point history'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedDriverId(null);
+                      setPointHistoryVisible(false);
+                    }}
+                  >
+                    Close application
+                  </button>
+                </div>
               </div>
               <dl className="driver-management__application-details">
                 <div>
@@ -160,6 +181,15 @@ export default function SponsorDriversPage({ user }) {
                   <dd>{pointValue(selectedDriver).toLocaleString()}</dd>
                 </div>
               </dl>
+              {pointHistoryVisible && (
+                <div className="driver-management__point-history" id="driver-point-history">
+                  <PointsTrendChart
+                    key={`${selectedDriver.id}-${pointHistoryVersion}`}
+                    endpoint={`/api/sponsor/drivers/${selectedDriver.id}/points/trend`}
+                    title={`Point history for ${selectedDriver.firstName} ${selectedDriver.lastName}`}
+                  />
+                </div>
+              )}
               <div className="driver-management__point-adjustment">
                 <h3>Adjust points</h3>
                 {rulesLoading ? (
@@ -176,6 +206,7 @@ export default function SponsorDriversPage({ user }) {
                           ? { ...driver, points: pointValue(driver) + changeAmount }
                           : driver
                       )));
+                      setPointHistoryVersion((version) => version + 1);
                     }}
                   />
                 )}
@@ -209,7 +240,10 @@ export default function SponsorDriversPage({ user }) {
                           type="button"
                           className="driver-management__view-application"
                           aria-pressed={selectedDriverId === driver.id}
-                          onClick={() => setSelectedDriverId(driver.id)}
+                          onClick={() => {
+                            setSelectedDriverId(driver.id);
+                            setPointHistoryVisible(false);
+                          }}
                         >
                           {selectedDriverId === driver.id ? 'Viewing application' : 'View application'}
                         </button>

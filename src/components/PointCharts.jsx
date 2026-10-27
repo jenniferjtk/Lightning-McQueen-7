@@ -89,10 +89,10 @@ export function PointsLostChart() {
   );
 }
 
-export function PointsTrendChart() {
-  const { data, error } = usePointData('/api/points/trend');
+export function PointsTrendChart({ endpoint = '/api/points/trend', title = 'Point total over time' } = {}) {
+  const { data, error } = usePointData(endpoint);
   return (
-    <ChartCard title="Point total over time" data={data} error={error}>
+    <ChartCard title={title} data={data} error={error}>
       <ResponsiveContainer width="100%" height={240}>
         <LineChart data={data} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
           <CartesianGrid stroke="#E4E0D6" />

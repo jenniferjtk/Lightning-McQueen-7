@@ -1,10 +1,18 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import SponsorDriversPage from '../../src/components/SponsorDriversPage.jsx';
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+beforeAll(() => {
+  global.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+});
 
 const drivers = [
   { id: 1, firstName: 'Dana', lastName: 'Driver', email: 'dana@example.com', points: 25, sponsorName: 'Roadrunner Logistics', status: 'approved', submittedAt: '2026-10-01T12:00:00Z', decidedAt: '2026-10-02T12:00:00Z' },
@@ -72,6 +80,27 @@ it('opens and closes a read-only application view for an individual driver', asy
 
   fireEvent.click(within(application).getByRole('button', { name: 'Close application' }));
   expect(screen.queryByRole('region', { name: 'Driver application' })).not.toBeInTheDocument();
+});
+
+it('shows point history for the selected driver on request', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url) => {
+    if (url === '/api/sponsor-rules') return { ok: true, json: async () => ({ rules: [] }) };
+    if (url === '/api/sponsor/drivers/2/points/trend') {
+      return { ok: true, json: async () => [{ date: '2026-10-01', cumulative_total: 25 }] };
+    }
+    return { ok: true, json: async () => ({ sponsorLinked: true, drivers }) };
+  }));
+  render(<SponsorDriversPage />);
+
+  const table = await screen.findByRole('table');
+  fireEvent.click(within(table).getAllByRole('button', { name: 'View application' })[0]);
+  fireEvent.click(within(screen.getByRole('region', { name: 'Driver application' }))
+    .getByRole('button', { name: 'Show point history' }));
+
+  expect(await screen.findByRole('region', { name: 'Point history for Alex Racer' })).toBeInTheDocument();
+  expect(fetch).toHaveBeenCalledWith('/api/sponsor/drivers/2/points/trend', { credentials: 'include' });
+  fireEvent.click(screen.getByRole('button', { name: 'Hide point history' }));
+  expect(screen.queryByRole('region', { name: 'Point history for Alex Racer' })).not.toBeInTheDocument();
 });
 
 it('loads this sponsor’s point rules and updates a driver balance after an adjustment', async () => {

@@ -925,6 +925,39 @@ app.get('/api/points/trend', requireRole('driver'), async (req, res) => {
   }
 });
 
+app.get('/api/sponsor/drivers/:driverUserId/points/trend', requireRole('sponsor'), async (req, res) => {
+  const driverUserId = Number(req.params.driverUserId);
+  if (!Number.isSafeInteger(driverUserId) || driverUserId < 1) {
+    return res.status(400).json({ message: 'Invalid driver account.' });
+  }
+
+  try {
+    const [approved] = await pool.execute(
+      "SELECT application_id FROM driver_applications WHERE driver_user_id = ? AND sponsor_id = ? AND status = 'approved'",
+      [driverUserId, req.currentUser.sponsor_id],
+    );
+    if (!approved[0]) return res.status(403).json({ message: 'This driver is not in your sponsor program.' });
+
+    const [rows] = await pool.execute(
+      `SELECT DATE_FORMAT(l.timestamp, '%Y-%m-%d') AS date, SUM(r.pt_value) AS change_amount
+       FROM point_audit_log l
+       JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+       WHERE l.affected_user_id = ?
+       GROUP BY date
+       ORDER BY date`,
+      [driverUserId],
+    );
+    let runningTotal = 0;
+    return res.json(rows.map((row) => {
+      runningTotal += Number(row.change_amount);
+      return { date: row.date, cumulative_total: runningTotal };
+    }));
+  } catch (error) {
+    console.error('Sponsor driver point trend lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load point history.' });
+  }
+});
+
 // A sponsor applies one of its own point rules to a driver in its program,
 // which writes the point_audit_log row the driver's point charts read. The
 // sponsor comes from the session; the rule supplies the amount and reason so
