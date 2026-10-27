@@ -19,7 +19,6 @@ import {
 } from './components/PointCharts.jsx';
 import SponsorCatalogPage from './components/SponsorCatalogPage.jsx';
 import CatalogPage from './components/CatalogPage.jsx';
-import { PointsGainedChart, PointsLostChart, PointsTrendChart } from './components/PointCharts.jsx';
 
 const emptyDriver = {
   name: '',
