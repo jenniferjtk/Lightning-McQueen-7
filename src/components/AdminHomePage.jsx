@@ -1,5 +1,52 @@
 import React, { useEffect, useState } from 'react';
 
+function PointChangeReports() {
+  const [reports, setReports] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    fetch('/api/admin/point-change-reports', { credentials: 'include' })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Unable to load point-change reports.');
+        if (!Array.isArray(data.reports)) throw new Error('Unable to load point-change reports.');
+        setReports(data.reports);
+      })
+      .catch((requestError) => setError(requestError.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <section className="card admin-point-reports">
+      <h2 className="card__title">Suspicious point-change reports</h2>
+      {loading ? (
+        <p className="admin-sponsor-links__state">Loading reports...</p>
+      ) : error ? (
+        <p className="admin-sponsor-links__state admin-sponsor-links__state--error" role="alert">{error}</p>
+      ) : reports.length === 0 ? (
+        <p className="admin-sponsor-links__state">There are no point-change reports.</p>
+      ) : (
+        <div className="admin-point-reports__list">
+          {reports.map((report) => (
+            <article className="admin-point-reports__item" key={report.id}>
+              <div>
+                <h3>{report.driverName || 'Deleted driver'} · {report.description || 'Point adjustment'}</h3>
+                <p>
+                  {report.amount >= 0 ? '+' : '-'}{Math.abs(report.amount).toLocaleString()} pts
+                  {' · '}{report.date}
+                </p>
+                <p>Reported by {report.reporterName || 'Deleted user'} ({report.reporterRole})</p>
+              </div>
+              <p className="admin-point-reports__details">{report.details}</p>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function SponsorAccountLinks() {
   const [sponsors, setSponsors] = useState([]);
   const [sponsorUsers, setSponsorUsers] = useState([]);
@@ -121,6 +168,7 @@ export default function AdminHomePage({ user, onPageChange }) {
           <button type="button" onClick={() => onPageChange('drivers')}>Open User management</button>
         </article>
       </section>
+      <PointChangeReports />
       <SponsorAccountLinks />
     </main>
   );

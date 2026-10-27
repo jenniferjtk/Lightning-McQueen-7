@@ -122,6 +122,40 @@ describe('sponsor driver point history', () => {
   });
 });
 
+describe('sponsor driver point entries', () => {
+  it('returns recent entries only for approved drivers in the sponsor program', async () => {
+    const agent = await signIn(app, users.sponsor);
+    db.execute.mockClear();
+    mockQueries([
+      roleLookup,
+      ['FROM driver_applications WHERE driver_user_id = ?', [{ application_id: 44 }]],
+      ['FROM point_audit_log l', [{
+        id: 12, label: 'Late delivery', amount: '-15', date: 'Oct 27, 2026',
+      }]],
+    ]);
+
+    const response = await agent.get('/api/sponsor/drivers/1/points/entries').expect(200);
+
+    expect(response.body.entries).toEqual([{ id: 12, label: 'Late delivery', amount: -15, date: 'Oct 27, 2026' }]);
+    expect(db.execute.mock.calls[1][1]).toEqual([users.driver.user_id, users.sponsor.sponsor_id]);
+    expect(db.execute.mock.calls[2][1]).toEqual([users.driver.user_id]);
+    expect(db.execute.mock.calls[2][0]).toContain('LIMIT 20');
+  });
+
+  it('denies access to drivers outside the sponsor program', async () => {
+    const agent = await signIn(app, users.sponsor);
+    db.execute.mockClear();
+    mockQueries([
+      roleLookup,
+      ['FROM driver_applications WHERE driver_user_id = ?', []],
+    ]);
+
+    await agent.get('/api/sponsor/drivers/4/points/entries')
+      .expect(403, { message: 'This driver is not in your sponsor program.' });
+    expect(db.execute).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('sponsor weekly point changes', () => {
   it('requires authentication', async () => {
     await request(app).get('/api/sponsor/points/weekly').expect(401);

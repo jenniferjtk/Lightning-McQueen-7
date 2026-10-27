@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import AdjustPointsForm from './AdjustPointsForm.jsx';
 import { PointsTrendChart } from './PointCharts.jsx';
+import PointChangeReportForm from './PointChangeReportForm.jsx';
 
 const SORT_OPTIONS = [
   { value: 'name-asc', label: 'Name (A to Z)' },
@@ -40,6 +41,9 @@ export default function SponsorDriversPage({ user }) {
   const [rules, setRules] = useState([]);
   const [rulesLoading, setRulesLoading] = useState(true);
   const [rulesError, setRulesError] = useState('');
+  const [pointEntries, setPointEntries] = useState([]);
+  const [pointEntriesLoading, setPointEntriesLoading] = useState(false);
+  const [pointEntriesError, setPointEntriesError] = useState('');
 
   useEffect(() => {
     fetch('/api/sponsor/drivers', { credentials: 'include' })
@@ -66,6 +70,32 @@ export default function SponsorDriversPage({ user }) {
       .catch((requestError) => setRulesError(requestError.message))
       .finally(() => setRulesLoading(false));
   }, [user?.sponsorId]);
+
+  useEffect(() => {
+    if (!selectedDriverId || !pointHistoryVisible) return;
+    let isCurrent = true;
+    setPointEntriesLoading(true);
+    setPointEntriesError('');
+    fetch(`/api/sponsor/drivers/${selectedDriverId}/points/entries`, { credentials: 'include' })
+      .then(async (response) => {
+        let data;
+        try {
+          data = await response.json();
+        } catch {
+          throw new Error('The point changes API returned a non-JSON response. Restart the backend or deploy the latest API version.');
+        }
+        if (!response.ok) throw new Error(data.message || 'Unable to load point changes.');
+        if (!Array.isArray(data.entries)) throw new Error('Unable to load point changes.');
+        if (isCurrent) setPointEntries(data.entries);
+      })
+      .catch((requestError) => {
+        if (isCurrent) setPointEntriesError(requestError.message);
+      })
+      .finally(() => {
+        if (isCurrent) setPointEntriesLoading(false);
+      });
+    return () => { isCurrent = false; };
+  }, [selectedDriverId, pointHistoryVisible, pointHistoryVersion]);
 
   const visibleDrivers = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
@@ -182,14 +212,41 @@ export default function SponsorDriversPage({ user }) {
                 </div>
               </dl>
               {pointHistoryVisible && (
-                <div className="driver-management__point-history" id="driver-point-history">
-                  <PointsTrendChart
-                    key={`${selectedDriver.id}-${pointHistoryVersion}`}
-                    endpoint={`/api/sponsor/drivers/${selectedDriver.id}/points/trend`}
-                    title={`Point history for ${selectedDriver.firstName} ${selectedDriver.lastName}`}
-                    fallbackError={`Unable to load ${selectedDriver.firstName} ${selectedDriver.lastName}'s point history.`}
-                  />
-                </div>
+                <>
+                  <div className="driver-management__point-history" id="driver-point-history">
+                    <PointsTrendChart
+                      key={`${selectedDriver.id}-${pointHistoryVersion}`}
+                      endpoint={`/api/sponsor/drivers/${selectedDriver.id}/points/trend`}
+                      title={`Point history for ${selectedDriver.firstName} ${selectedDriver.lastName}`}
+                      fallbackError={`Unable to load ${selectedDriver.firstName} ${selectedDriver.lastName}'s point history.`}
+                    />
+                  </div>
+                  <section className="driver-management__point-entries" aria-label="Recent point changes">
+                    <h3>Recent point changes</h3>
+                    {pointEntriesLoading ? (
+                      <p className="driver-management-page__message">Loading point changes...</p>
+                    ) : pointEntriesError ? (
+                      <p className="driver-management-page__message" role="alert">{pointEntriesError}</p>
+                    ) : pointEntries.length === 0 ? (
+                      <p className="driver-management-page__message">No point changes to review.</p>
+                    ) : (
+                      <ul className="points-activity-card__list">
+                        {pointEntries.map((entry) => (
+                          <li key={entry.id} className="points-activity-card__item">
+                            <div>
+                              <p className="points-activity-card__label">{entry.label}</p>
+                              <p className="points-activity-card__date">{entry.date}</p>
+                            </div>
+                            <span className={entry.amount >= 0 ? 'points-activity-card__amount points-activity-card__amount--positive' : 'points-activity-card__amount points-activity-card__amount--negative'}>
+                              {entry.amount >= 0 ? '+' : '-'}{Math.abs(entry.amount).toLocaleString()} pts
+                            </span>
+                            <PointChangeReportForm entry={entry} />
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </section>
+                </>
               )}
               <div className="driver-management__point-adjustment">
                 <h3>Adjust points</h3>

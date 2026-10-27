@@ -13,6 +13,7 @@ import AdminDriversPage from './components/AdminDriversPage.jsx';
 import SponsorConversionCard from './components/SponsorConversionCard.jsx';
 import SponsorApplicationsPage from './components/SponsorApplicationsPage.jsx';
 import SponsorDriversPage from './components/SponsorDriversPage.jsx';
+import PointChangeReportForm from './components/PointChangeReportForm.jsx';
 import {
   PointsGainedChart, PointsLostChart, PointsTrendChart, SponsorWeeklyPointsChart,
 } from './components/PointCharts.jsx';
@@ -175,6 +176,7 @@ export default function App() {
                             <span className={entry.amount >= 0 ? 'points-activity-card__amount points-activity-card__amount--positive' : 'points-activity-card__amount points-activity-card__amount--negative'}>
                               {entry.amount >= 0 ? '+' : '-'}{Math.abs(entry.amount).toLocaleString()} pts
                             </span>
+                            <PointChangeReportForm entry={entry} />
                           </li>
                         ))}
                       </ul>

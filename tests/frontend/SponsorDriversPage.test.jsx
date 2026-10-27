@@ -88,6 +88,9 @@ it('shows point history for the selected driver on request', async () => {
     if (url === '/api/sponsor/drivers/2/points/trend') {
       return { ok: true, json: async () => [{ date: '2026-10-01', cumulative_total: 25 }] };
     }
+    if (url === '/api/sponsor/drivers/2/points/entries') {
+      return { ok: true, json: async () => ({ entries: [] }) };
+    }
     return { ok: true, json: async () => ({ sponsorLinked: true, drivers }) };
   }));
   render(<SponsorDriversPage />);
@@ -101,6 +104,65 @@ it('shows point history for the selected driver on request', async () => {
   expect(fetch).toHaveBeenCalledWith('/api/sponsor/drivers/2/points/trend', { credentials: 'include' });
   fireEvent.click(screen.getByRole('button', { name: 'Hide point history' }));
   expect(screen.queryByRole('region', { name: 'Point history for Alex Racer' })).not.toBeInTheDocument();
+});
+
+it('lets a sponsor report a selected driver point change', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url) => {
+    if (url === '/api/sponsor-rules') return { ok: true, json: async () => ({ rules: [] }) };
+    if (url === '/api/sponsor/drivers/2/points/entries') {
+      return {
+        ok: true,
+        json: async () => ({
+          entries: [{ id: 12, label: 'Late delivery', amount: -15, date: 'Oct 27, 2026' }],
+        }),
+      };
+    }
+    if (url === '/api/point-change-reports') return { ok: true, json: async () => ({ reportId: 8 }) };
+    return { ok: true, json: async () => ({ sponsorLinked: true, drivers }) };
+  }));
+  render(<SponsorDriversPage user={{ sponsorId: 10 }} />);
+
+  const table = await screen.findByRole('table');
+  fireEvent.click(within(table).getAllByRole('button', { name: 'View application' })[0]);
+  fireEvent.click(within(screen.getByRole('region', { name: 'Driver application' }))
+    .getByRole('button', { name: 'Show point history' }));
+
+  const entry = await screen.findByText('Late delivery');
+  const entryRow = entry.closest('li');
+  fireEvent.click(within(entryRow).getByRole('button', { name: 'Report point change' }));
+  fireEvent.change(within(entryRow).getByLabelText('Why does this point change look suspicious?'), {
+    target: { value: 'This is not consistent with the trip record.' },
+  });
+  fireEvent.click(within(entryRow).getByRole('button', { name: 'Send report' }));
+
+  expect(await within(entryRow).findByRole('status')).toHaveTextContent('Reported to admins');
+  expect(fetch).toHaveBeenCalledWith('/api/point-change-reports', expect.objectContaining({
+    method: 'POST',
+    body: JSON.stringify({ pointLogId: 12, details: 'This is not consistent with the trip record.' }),
+  }));
+});
+
+it('explains when the point changes API returns HTML instead of JSON', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url) => {
+    if (url === '/api/sponsor-rules') return { ok: true, json: async () => ({ rules: [] }) };
+    if (url === '/api/sponsor/drivers/2/points/entries') {
+      return { ok: false, json: async () => { throw new SyntaxError('Unexpected token <'); } };
+    }
+    if (url === '/api/sponsor/drivers/2/points/trend') {
+      return { ok: true, json: async () => [] };
+    }
+    return { ok: true, json: async () => ({ sponsorLinked: true, drivers }) };
+  }));
+  render(<SponsorDriversPage user={{ sponsorId: 10 }} />);
+
+  const table = await screen.findByRole('table');
+  fireEvent.click(within(table).getAllByRole('button', { name: 'View application' })[0]);
+  fireEvent.click(within(screen.getByRole('region', { name: 'Driver application' }))
+    .getByRole('button', { name: 'Show point history' }));
+
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'The point changes API returned a non-JSON response. Restart the backend or deploy the latest API version.',
+  );
 });
 
 it('loads this sponsor’s point rules and updates a driver balance after an adjustment', async () => {
