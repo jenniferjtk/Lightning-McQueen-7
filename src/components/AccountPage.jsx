@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 
-export default function AccountPage({ user, onProfileUpdate }) {
-  const isDriver = user?.role === 'driver';
-  const isSponsor = user?.role === 'sponsor';
+export default function AccountPage({ user, onProfileUpdate, roleOverride = null, readOnly = false }) {
+  const isDriver = (roleOverride || user?.role) === 'driver';
+  const isSponsor = (roleOverride || user?.role) === 'sponsor';
   const [form, setForm] = useState({
     firstName: user?.firstName || '',
     lastName: user?.lastName || '',
@@ -121,11 +121,13 @@ export default function AccountPage({ user, onProfileUpdate }) {
       <section className="account-card">
         <div className="account-card__header">
           <div>
-            <p className="account-card__eyebrow">Edit account</p>
+            <p className="account-card__eyebrow">{readOnly ? 'Preview account' : 'Edit account'}</p>
             <h1>{form.firstName || (isDriver ? 'Driver' : 'Account')} {form.lastName || ''}</h1>
           </div>
-          <span className="account-card__badge">Active</span>
+          <span className="account-card__badge">{readOnly ? 'Read only' : 'Active'}</span>
         </div>
+
+        {readOnly && <p className="account-preview-note">This is your authenticated administrator account shown as a {isDriver ? 'driver' : 'sponsor'}.</p>}
 
         <div className="edit-account-form">
           {(isDriver || isSponsor) && <div className="account-tabs" role="tablist" aria-label="Account details">
@@ -188,27 +190,27 @@ export default function AccountPage({ user, onProfileUpdate }) {
             <div className="edit-account-form__row">
               <label>
                 First name
-                <input name="firstName" value={form.firstName} onChange={updateField} />
+                <input name="firstName" value={form.firstName} onChange={updateField} disabled={readOnly} />
               </label>
               <label>
                 Last name
-                <input name="lastName" value={form.lastName} onChange={updateField} />
+                <input name="lastName" value={form.lastName} onChange={updateField} disabled={readOnly} />
               </label>
             </div>
 
             <label>
               Email address
-              <input type="email" name="email" value={form.email} onChange={updateField} />
+              <input type="email" name="email" value={form.email} onChange={updateField} disabled={readOnly} />
             </label>
 
             <label>
               Phone number
-              <input name="phone" value={form.phone} onChange={updateField} placeholder="(555) 123-4567" />
+              <input name="phone" value={form.phone} onChange={updateField} placeholder="(555) 123-4567" disabled={readOnly} />
             </label>
 
             {isDriver && <label>
               Sponsor
-              <input name="sponsorName" value={form.sponsorName} onChange={updateField} placeholder="Sponsor name" />
+              <input name="sponsorName" value={form.sponsorName} onChange={updateField} placeholder="Sponsor name" disabled={readOnly} />
             </label>}
 
             <form className="password-change" onSubmit={changePassword}>
@@ -222,6 +224,7 @@ export default function AccountPage({ user, onProfileUpdate }) {
                   onChange={updatePasswordField}
                   autoComplete="current-password"
                   required
+                  disabled={readOnly}
                 />
               </label>
               <div className="edit-account-form__row">
@@ -235,6 +238,7 @@ export default function AccountPage({ user, onProfileUpdate }) {
                     autoComplete="new-password"
                     minLength={8}
                     required
+                    disabled={readOnly}
                   />
                 </label>
                 <label>
@@ -247,6 +251,7 @@ export default function AccountPage({ user, onProfileUpdate }) {
                     autoComplete="new-password"
                     minLength={8}
                     required
+                    disabled={readOnly}
                   />
                 </label>
               </div>
@@ -255,7 +260,7 @@ export default function AccountPage({ user, onProfileUpdate }) {
                   {passwordMessage}
                 </p>
               )}
-              <button className="edit-account-form__submit" type="submit" disabled={passwordSaving}>
+              <button className="edit-account-form__submit" type="submit" disabled={readOnly || passwordSaving}>
                 {passwordSaving ? 'Updating password...' : 'Update password'}
               </button>
             </form>
@@ -271,28 +276,28 @@ export default function AccountPage({ user, onProfileUpdate }) {
             <h2>Shipping address</h2>
             <label>
               Street address
-              <input name="streetAddress" value={form.streetAddress} onChange={updateField} placeholder="123 Main Street" />
+              <input name="streetAddress" value={form.streetAddress} onChange={updateField} placeholder="123 Main Street" disabled={readOnly} />
             </label>
 
             <div className="edit-account-form__row">
               <label>
                 City
-                <input name="city" value={form.city} onChange={updateField} placeholder="Clemson" />
+                <input name="city" value={form.city} onChange={updateField} placeholder="Clemson" disabled={readOnly} />
               </label>
               <label>
                 State
-                <input name="state" value={form.state} onChange={updateField} placeholder="SC" />
+                <input name="state" value={form.state} onChange={updateField} placeholder="SC" disabled={readOnly} />
               </label>
             </div>
 
             <div className="edit-account-form__row">
               <label>
                 ZIP code
-                <input name="zipCode" value={form.zipCode} onChange={updateField} placeholder="29631" />
+                <input name="zipCode" value={form.zipCode} onChange={updateField} placeholder="29631" disabled={readOnly} />
               </label>
               <label>
                 Country
-                <input name="country" value={form.country} onChange={updateField} placeholder="United States" />
+                <input name="country" value={form.country} onChange={updateField} placeholder="United States" disabled={readOnly} />
               </label>
             </div>
           </div>}
@@ -349,7 +354,7 @@ export default function AccountPage({ user, onProfileUpdate }) {
 
           {activeTab === 'account' && (
             <div className="edit-account-form__actions">
-              <button className="edit-account-form__submit" type="button" onClick={submit}>Save account</button>
+              <button className="edit-account-form__submit" type="button" onClick={submit} disabled={readOnly}>Save account</button>
               <a className="edit-account-form__secondary" href="/">Back to dashboard</a>
             </div>
           )}

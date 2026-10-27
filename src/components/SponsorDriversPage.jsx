@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import AdjustPointsForm from './AdjustPointsForm.jsx';
 import { PointsTrendChart } from './PointCharts.jsx';
 import PointChangeReportForm from './PointChangeReportForm.jsx';
+import BulkUserUpload from './BulkUserUpload.jsx';
 
 const SORT_OPTIONS = [
   { value: 'name-asc', label: 'Name (A to Z)' },
@@ -44,6 +45,7 @@ export default function SponsorDriversPage({ user }) {
   const [pointEntries, setPointEntries] = useState([]);
   const [pointEntriesLoading, setPointEntriesLoading] = useState(false);
   const [pointEntriesError, setPointEntriesError] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     fetch('/api/sponsor/drivers', { credentials: 'include' })
@@ -56,7 +58,7 @@ export default function SponsorDriversPage({ user }) {
       })
       .catch((requestError) => setError(requestError.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [reloadKey]);
 
   useEffect(() => {
     fetch('/api/sponsor-rules', { credentials: 'include' })
@@ -121,6 +123,10 @@ export default function SponsorDriversPage({ user }) {
         <h1>Driver management.</h1>
         <p>Find drivers in your organization and review their current point balances.</p>
       </section>
+
+      {!loading && !error && sponsorLinked && (
+        <BulkUserUpload onCreated={() => setReloadKey((key) => key + 1)} />
+      )}
 
       {loading ? (
         <p className="driver-management-page__message">Loading drivers...</p>

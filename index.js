@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import session from 'express-session';
 import MySQLStoreFactory from 'express-mysql-session';
 import mysql from 'mysql2/promise';
+import { CatalogProviderError, fetchProduct, fetchProducts } from './fakeStore.js';
 
 dotenv.config();
 
@@ -62,6 +63,7 @@ const publicUser = (user) => ({
   firstName: user.first_name,
   lastName: user.last_name,
   sponsorId: user.sponsor_id ?? null,
+  createdAt: user.created_at,
 });
 
 const adminDriver = (user) => ({
@@ -73,6 +75,28 @@ const adminDriver = (user) => ({
 });
 
 const validEmail = (email) => typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+// Shared by every route that creates an account (admin create, sponsor bulk
+// upload), so they all enforce the same rules. Returns an error message, or
+// null when the fields are valid.
+const newUserError = ({ email, password, firstName, lastName, role }, allowedRoles) => {
+  if (!allowedRoles.includes(role)) {
+    const roleList = allowedRoles.length > 2
+      ? `${allowedRoles.slice(0, -1).join(', ')}, or ${allowedRoles.at(-1)}`
+      : allowedRoles.join(' or ');
+    return `Choose a ${roleList} role.`;
+  }
+  if (!validEmail(email) || typeof password !== 'string' || !password ||
+      typeof firstName !== 'string' || !firstName.trim() ||
+      typeof lastName !== 'string' || !lastName.trim()) {
+    return 'A first name, last name, valid email, and password are required.';
+  }
+  if (password.length < 8) return 'Password must be at least 8 characters.';
+  if (Buffer.byteLength(password, 'utf8') > 72) return 'Password must be 72 bytes or fewer.';
+  return null;
+};
+
+const hashPassword = (password) => bcrypt.hash(password, 12);
 
 const requireRuleManager = async (req, res, next) => {
   if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
@@ -128,7 +152,7 @@ const requireLinkedSponsor = async (req, res, next) => {
     const [rows] = await pool.execute(
       `SELECT s.sponsor_id, s.name
        FROM users u
-       JOIN sponsors s ON s.sponsor_user_id = u.user_id
+       JOIN sponsors s ON s.sponsor_id = u.sponsor_id
        WHERE u.user_id = ? AND u.role = 'sponsor'`,
       [req.session.userId],
     );
@@ -292,10 +316,16 @@ app.get('/api/admin/point-change-reports', requireAdmin, async (req, res) => {
 app.get('/api/admin/drivers', requireAdmin, async (req, res) => {
   try {
     const [rows] = await pool.execute(
-      `SELECT user_id, email, first_name, last_name, created_at
-       FROM users WHERE role = 'driver' ORDER BY created_at DESC, user_id DESC`,
+      `SELECT u.user_id, u.email, u.first_name, u.last_name, u.created_at,
+              GROUP_CONCAT(DISTINCT s.name ORDER BY s.name SEPARATOR ', ') AS affiliation
+       FROM users u
+       LEFT JOIN driver_applications a ON a.driver_user_id = u.user_id AND a.status = 'approved'
+       LEFT JOIN sponsors s ON s.sponsor_id = a.sponsor_id
+       WHERE u.role = 'driver'
+       GROUP BY u.user_id, u.email, u.first_name, u.last_name, u.created_at
+       ORDER BY u.created_at DESC, u.user_id DESC`,
     );
-    return res.json({ drivers: rows.map(adminDriver) });
+    return res.json({ drivers: rows.map((driver) => ({ ...adminDriver(driver), affiliation: driver.affiliation || null })) });
   } catch (error) {
     console.error('Driver list failed:', error.message);
     return res.status(500).json({ message: 'Unable to load driver accounts.' });
@@ -304,15 +334,9 @@ app.get('/api/admin/drivers', requireAdmin, async (req, res) => {
 
 app.get('/api/admin/sponsor-links', requireAdmin, async (req, res) => {
   try {
-    const [sponsors] = await pool.execute(
-      `SELECT s.sponsor_id, s.name, s.sponsor_user_id,
-              u.email AS sponsor_user_email
-       FROM sponsors s
-       LEFT JOIN users u ON u.user_id = s.sponsor_user_id
-       ORDER BY s.name`,
-    );
+    const [sponsors] = await pool.execute('SELECT sponsor_id, name FROM sponsors ORDER BY name');
     const [sponsorUsers] = await pool.execute(
-      `SELECT user_id, email, first_name, last_name
+      `SELECT user_id, email, first_name, last_name, sponsor_id
        FROM users WHERE role = 'sponsor'
        ORDER BY last_name, first_name, user_id`,
     );
@@ -323,30 +347,30 @@ app.get('/api/admin/sponsor-links', requireAdmin, async (req, res) => {
   }
 });
 
-app.put('/api/admin/sponsor-links/:sponsorId', requireAdmin, async (req, res) => {
-  const sponsorId = Number(req.params.sponsorId);
-  const sponsorUserId = req.body?.sponsorUserId === null || req.body?.sponsorUserId === ''
+// Links a sponsor login to the organization it acts for (users.sponsor_id).
+app.put('/api/admin/sponsor-links/:userId', requireAdmin, async (req, res) => {
+  const userId = Number(req.params.userId);
+  const sponsorId = req.body?.sponsorId === null || req.body?.sponsorId === ''
     ? null
-    : Number(req.body?.sponsorUserId);
-  if (!Number.isSafeInteger(sponsorId) || sponsorId < 1) {
-    return res.status(400).json({ message: 'Invalid sponsor organization.' });
+    : Number(req.body?.sponsorId);
+  if (!Number.isSafeInteger(userId) || userId < 1) {
+    return res.status(400).json({ message: 'Invalid sponsor account.' });
   }
-  if (sponsorUserId !== null && (!Number.isSafeInteger(sponsorUserId) || sponsorUserId < 1)) {
-    return res.status(400).json({ message: 'Choose a valid sponsor account.' });
+  if (sponsorId !== null && (!Number.isSafeInteger(sponsorId) || sponsorId < 1)) {
+    return res.status(400).json({ message: 'Choose a valid sponsor organization.' });
   }
   try {
-    const [sponsors] = await pool.execute('SELECT sponsor_id FROM sponsors WHERE sponsor_id = ?', [sponsorId]);
-    if (!sponsors[0]) return res.status(404).json({ message: 'Sponsor organization not found.' });
-    if (sponsorUserId !== null) {
-      const [users] = await pool.execute("SELECT user_id FROM users WHERE user_id = ? AND role = 'sponsor'", [sponsorUserId]);
-      if (!users[0]) return res.status(400).json({ message: 'Choose a sponsor account.' });
+    if (sponsorId !== null) {
+      const [sponsors] = await pool.execute('SELECT sponsor_id FROM sponsors WHERE sponsor_id = ?', [sponsorId]);
+      if (!sponsors[0]) return res.status(404).json({ message: 'Sponsor organization not found.' });
     }
-    await pool.execute('UPDATE sponsors SET sponsor_user_id = ? WHERE sponsor_id = ?', [sponsorUserId, sponsorId]);
+    const [result] = await pool.execute(
+      "UPDATE users SET sponsor_id = ? WHERE user_id = ? AND role = 'sponsor'",
+      [sponsorId, userId],
+    );
+    if (!result.affectedRows) return res.status(404).json({ message: 'Sponsor account not found.' });
     return res.json({ message: 'Sponsor account link saved.' });
   } catch (error) {
-    if (error.code === 'ER_DUP_ENTRY') {
-      return res.status(409).json({ message: 'That sponsor account is already linked to another organization.' });
-    }
     console.error('Sponsor account link update failed:', error.message);
     return res.status(500).json({ message: 'Unable to save the sponsor account link.' });
   }
@@ -408,32 +432,44 @@ app.get('/api/driver/conversion', async (req, res) => {
 app.get('/api/admin/sponsors', requireAdmin, async (req, res) => {
   try {
     const [rows] = await pool.execute(
-      `SELECT user_id, email, first_name, last_name, created_at
-       FROM users WHERE role = 'sponsor' ORDER BY created_at DESC, user_id DESC`,
+      `SELECT u.user_id, u.email, u.first_name, u.last_name, u.created_at,
+            s.name AS affiliation
+       FROM users u
+       LEFT JOIN sponsors s ON s.sponsor_id = u.sponsor_id
+       WHERE u.role = 'sponsor'
+       ORDER BY u.created_at DESC, u.user_id DESC`,
     );
-    return res.json({ sponsors: rows.map(adminDriver) });
+     return res.json({ sponsors: rows.map((sponsor) => ({ ...adminDriver(sponsor), affiliation: sponsor.affiliation || null })) });
   } catch (error) {
     console.error('Sponsor user list failed:', error.message);
     return res.status(500).json({ message: 'Unable to load sponsor accounts.' });
   }
 });
 
+app.get('/api/admin/sponsor-applications', requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT a.application_id, a.status, a.submitted_at, a.decided_at,
+              u.user_id AS driver_user_id, u.first_name, u.last_name, u.email,
+              s.sponsor_id, s.name AS sponsor_name
+       FROM driver_applications a
+       JOIN users u ON u.user_id = a.driver_user_id
+       JOIN sponsors s ON s.sponsor_id = a.sponsor_id
+       ORDER BY a.submitted_at DESC`,
+    );
+    return res.json({ applications: rows });
+  } catch (error) {
+    console.error('Admin sponsor application lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load sponsor applications.' });
+  }
+});
+
 app.post('/api/admin/users', requireAdmin, async (req, res) => {
   const { email, password, firstName, lastName, role } = req.body || {};
-  if (!['driver', 'admin', 'sponsor'].includes(role)) {
-    return res.status(400).json({ message: 'Choose a driver, admin, or sponsor role.' });
-  }
-  if (!validEmail(email) || typeof password !== 'string' || !password ||
-      typeof firstName !== 'string' || !firstName.trim() ||
-      typeof lastName !== 'string' || !lastName.trim()) {
-    return res.status(400).json({ message: 'A first name, last name, valid email, and password are required.' });
-  }
-  if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters.' });
-  if (Buffer.byteLength(password, 'utf8') > 72) {
-    return res.status(400).json({ message: 'Password must be 72 bytes or fewer.' });
-  }
+  const validationError = newUserError({ email, password, firstName, lastName, role }, ['driver', 'admin', 'sponsor']);
+  if (validationError) return res.status(400).json({ message: validationError });
   try {
-    const passwordHash = await bcrypt.hash(password, 12);
+    const passwordHash = await hashPassword(password);
     const [result] = await pool.execute(
       `INSERT INTO users (email, password_hash, role, first_name, last_name, created_at)
        VALUES (?, ?, ?, ?, ?, NOW())`,
@@ -1160,9 +1196,8 @@ app.post('/api/points/apply', requireRole('sponsor'), async (req, res) => {
   }
 });
 
-// Dashboard data for the signed-in user. The sponsor is whichever sponsor(s)
-// approved this driver's application. The balance and recent updates come
-// from point_audit_log; purchases aren't stored yet, so they stay empty.
+// Dashboard data for the signed-in user. Sponsor applications determine the
+// driver's affiliations. The balance and recent updates come from the point log.
 app.get('/api/driver', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
 
@@ -1174,7 +1209,7 @@ app.get('/api/driver', async (req, res) => {
     if (!users[0]) return res.status(401).json({ message: 'Session expired.' });
 
     const [sponsors] = await pool.execute(
-      `SELECT s.name
+      `SELECT s.sponsor_id AS id, s.name
        FROM driver_applications a
        JOIN sponsors s ON s.sponsor_id = a.sponsor_id
        WHERE a.driver_user_id = ? AND a.status = 'approved'
@@ -1190,7 +1225,8 @@ app.get('/api/driver', async (req, res) => {
       [req.session.userId],
     );
     const [recent] = await pool.execute(
-      `SELECT l.log_id, r.description, r.pt_value, DATE_FORMAT(l.timestamp, '%b %e, %Y') AS date
+      `SELECT l.log_id, COALESCE(NULLIF(l.comment, ''), r.description) AS description,
+              r.pt_value, DATE_FORMAT(l.timestamp, '%b %e, %Y') AS date
        FROM point_audit_log l
        JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
        WHERE l.affected_user_id = ?
@@ -1199,23 +1235,544 @@ app.get('/api/driver', async (req, res) => {
       [req.session.userId],
     );
 
+    const balanceNotifications = recent.map((entry) => ({
+      id: entry.log_id,
+      label: entry.description || 'Unspecified',
+      date: entry.date,
+      amount: Number(entry.pt_value),
+    }));
+
     return res.json({
       id: users[0].user_id,
       name: `${users[0].first_name} ${users[0].last_name}`.trim(),
       dateJoined: users[0].created_at,
       sponsorName: sponsors.map((sponsor) => sponsor.name).join(', '),
-      points: Number(balance.points),
-      balanceNotifications: recent.map((entry) => ({
-        id: entry.log_id,
-        label: entry.description || 'Point adjustment',
-        date: entry.date,
-        amount: Number(entry.pt_value),
-      })),
+      sponsors,
+      points: Number(balance?.points || 0),
+      balanceNotifications,
       recentPurchases: [],
     });
   } catch (error) {
     console.error('Driver dashboard lookup failed:', error.message);
     return res.status(500).json({ message: 'Unable to load your dashboard.' });
+  }
+});
+
+// Product catalog. Products come from the Fake Store API (fakeStore.js) into
+// cached_products; each sponsor picks its own subset into sponsor_catalog
+// (backend/db/migrations/005_catalog_tables.sql). Browsing reads the cache and
+// refetches the provider's list once the cache is older than the TTL; the
+// one-product live check re-fetches before checkout.
+const CATALOG_CACHE_TTL_SECONDS = Number(process.env.CATALOG_CACHE_TTL_MINUTES || 15) * 60;
+const CATALOG_UNAVAILABLE = 'The product catalog is unavailable right now. Please try again in a few minutes.';
+
+const parseId = (value) => {
+  const id = Number(value);
+  return Number.isSafeInteger(id) && id >= 1 && id <= 2147483647 ? id : null;
+};
+
+// Missing or blank means "no tag" (null); anything else must be a short string.
+const parseCategoryTag = (value) => {
+  if (value === undefined || value === null) return { categoryTag: null };
+  if (typeof value !== 'string') return { error: 'Category tag must be text.' };
+  const categoryTag = value.trim();
+  if (categoryTag.length > 100) return { error: 'Category tag must be 100 characters or fewer.' };
+  return { categoryTag: categoryTag || null };
+};
+
+const escapeLike = (text) => text.replace(/[\\%_]/g, (character) => `\\${character}`);
+
+// point_conversion_rate is dollars per point. toFixed trims float noise so a
+// $1.10 item at $0.10/pt is 11 points, not 12.
+const pointCost = (price, pointConversionRate) => {
+  const rate = Number(pointConversionRate);
+  return rate > 0 ? Math.ceil(Number((Number(price) / rate).toFixed(6))) : null;
+};
+
+const catalogProduct = (row) => ({
+  productId: row.product_id,
+  title: row.title,
+  price: Number(row.price),
+  description: row.description,
+  category: row.category,
+  imageUrl: row.image_url,
+});
+
+const sponsorCatalogProduct = (row, pointConversionRate) => ({
+  ...catalogProduct(row),
+  categoryTag: row.category_tag ?? null,
+  displayCategory: row.category_tag || row.category,
+  pointCost: pointCost(row.price, pointConversionRate),
+});
+
+const upsertCachedProducts = async (products) => {
+  if (!products.length) return;
+  await pool.execute(
+    `INSERT INTO cached_products (product_id, title, price, description, category, image_url, fetched_at)
+     VALUES ${products.map(() => '(?, ?, ?, ?, ?, ?, NOW())').join(', ')}
+     ON DUPLICATE KEY UPDATE title = VALUES(title), price = VALUES(price), description = VALUES(description),
+       category = VALUES(category), image_url = VALUES(image_url), fetched_at = VALUES(fetched_at)`,
+    products.flatMap((product) => [
+      product.productId, product.title, product.price, product.description, product.category, product.imageUrl,
+    ]),
+  );
+};
+
+// Refetches the provider's product list when the last full refresh is older
+// than the TTL. If the provider is down but an older copy exists, that copy is
+// served and { stale: true } is returned; with nothing cached it throws.
+const refreshCatalogCacheIfStale = async () => {
+  const [[cache]] = await pool.execute(
+    `SELECT COUNT(*) AS product_count, TIMESTAMPDIFF(SECOND, MAX(fetched_at), NOW()) AS age_seconds
+     FROM cached_products`,
+  );
+  const cachedCount = Number(cache.product_count);
+  if (cachedCount > 0 && Number(cache.age_seconds) < CATALOG_CACHE_TTL_SECONDS) return { stale: false };
+  try {
+    await upsertCachedProducts(await fetchProducts());
+    return { stale: false };
+  } catch (error) {
+    if (!(error instanceof CatalogProviderError) || cachedCount === 0) throw error;
+    console.error('Catalog refresh failed, serving cached products:', error.message);
+    return { stale: true };
+  }
+};
+
+const sendCatalogError = (res, error, context, message) => {
+  console.error(`${context}:`, error.message);
+  if (error instanceof CatalogProviderError) {
+    return res.status(502).json({ message: CATALOG_UNAVAILABLE, code: 'CATALOG_UNAVAILABLE' });
+  }
+  return res.status(500).json({ message });
+};
+
+// Admins see any sponsor's catalog, sponsors only their own organization's,
+// and drivers only the catalogs of sponsors that approved them.
+const canViewSponsorCatalog = async (user, sponsorId) => {
+  if (user.role === 'admin') return true;
+  if (user.role === 'sponsor') return Number(user.sponsor_id) === sponsorId;
+  const [approved] = await pool.execute(
+    "SELECT application_id FROM driver_applications WHERE driver_user_id = ? AND sponsor_id = ? AND status = 'approved'",
+    [user.user_id, sponsorId],
+  );
+  return Boolean(approved[0]);
+};
+
+const requireCatalogViewer = async (req, res, next) => {
+  const sponsorId = parseId(req.params.sponsorId);
+  if (!sponsorId) return res.status(400).json({ message: 'Invalid sponsor organization.' });
+  try {
+    if (!(await canViewSponsorCatalog(req.currentUser, sponsorId))) {
+      return res.status(403).json({ message: 'You do not have access to this sponsor\'s catalog.' });
+    }
+    req.catalogSponsorId = sponsorId;
+    return next();
+  } catch (error) {
+    console.error('Catalog authorization failed:', error.message);
+    return res.status(500).json({ message: 'Unable to authorize this request.' });
+  }
+};
+
+// Curation is limited to the sponsor's own organization. The sponsor in the URL
+// is checked against the session, the same way application decisions are.
+const requireOwnCatalog = (req, res, next) => {
+  const sponsorId = parseId(req.params.sponsorId);
+  if (!sponsorId) return res.status(400).json({ message: 'Invalid sponsor organization.' });
+  if (sponsorId !== Number(req.currentUser.sponsor_id)) {
+    return res.status(403).json({ message: 'This catalog belongs to a different sponsor.' });
+  }
+  req.catalogSponsorId = sponsorId;
+  return next();
+};
+
+// The full provider product set, so a sponsor can choose what to offer. Each
+// product says whether it's already in the signed-in sponsor's catalog.
+app.get('/api/catalog/products', requireRole('sponsor', 'admin'), async (req, res) => {
+  const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+  const category = typeof req.query.category === 'string' ? req.query.category.trim() : '';
+  if (search.length > 100 || category.length > 100) {
+    return res.status(400).json({ message: 'Search and category must be 100 characters or fewer.' });
+  }
+
+  try {
+    const { stale } = await refreshCatalogCacheIfStale();
+    const filters = [];
+    const params = [req.currentUser.sponsor_id ?? null];
+    if (search) {
+      filters.push('(p.title LIKE ? OR p.description LIKE ?)');
+      params.push(`%${escapeLike(search)}%`, `%${escapeLike(search)}%`);
+    }
+    if (category) {
+      filters.push('p.category = ?');
+      params.push(category);
+    }
+    const [rows] = await pool.execute(
+      `SELECT p.product_id, p.title, p.price, p.description, p.category, p.image_url,
+              sc.category_tag, sc.product_id IS NOT NULL AS in_catalog
+       FROM cached_products p
+       LEFT JOIN sponsor_catalog sc ON sc.product_id = p.product_id AND sc.sponsor_id = ?
+       ${filters.length ? `WHERE ${filters.join(' AND ')}` : ''}
+       ORDER BY p.category, p.product_id`,
+      params,
+    );
+    const [categories] = await pool.execute('SELECT DISTINCT category FROM cached_products ORDER BY category');
+    return res.json({
+      products: rows.map((row) => ({
+        ...catalogProduct(row),
+        inCatalog: Boolean(Number(row.in_catalog)),
+        categoryTag: row.category_tag ?? null,
+      })),
+      categories: categories.map((row) => row.category),
+      stale,
+    });
+  } catch (error) {
+    return sendCatalogError(res, error, 'Catalog product list failed', 'Unable to load catalog products.');
+  }
+});
+
+// One sponsor's catalog. Drivers with more than one sponsor call this once per
+// sponsor; the sponsor always comes from the URL and is checked against the
+// session, so a driver never sees products their sponsor didn't select.
+app.get('/api/sponsors/:sponsorId/catalog', requireRole('driver', 'sponsor', 'admin'), requireCatalogViewer, async (req, res) => {
+  try {
+    const [sponsors] = await pool.execute(
+      'SELECT sponsor_id, name, point_conversion_rate FROM sponsors WHERE sponsor_id = ?',
+      [req.catalogSponsorId],
+    );
+    if (!sponsors[0]) return res.status(404).json({ message: 'Sponsor organization not found.' });
+
+    const { stale } = await refreshCatalogCacheIfStale();
+    const [rows] = await pool.execute(
+      `SELECT p.product_id, p.title, p.price, p.description, p.category, p.image_url, sc.category_tag
+       FROM sponsor_catalog sc
+       JOIN cached_products p ON p.product_id = sc.product_id
+       WHERE sc.sponsor_id = ?
+       ORDER BY COALESCE(sc.category_tag, p.category), p.title`,
+      [req.catalogSponsorId],
+    );
+    // A driver's points are earned per sponsor (each rule belongs to one), so
+    // the balance shown beside a catalog only counts this sponsor's rules.
+    let pointBalance = null;
+    if (req.currentUser.role === 'driver') {
+      const [[balance]] = await pool.execute(
+        `SELECT COALESCE(SUM(r.pt_value), 0) AS points
+         FROM point_audit_log l
+         JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+         WHERE l.affected_user_id = ? AND r.sponsor_id = ?`,
+        [req.currentUser.user_id, req.catalogSponsorId],
+      );
+      pointBalance = Number(balance?.points || 0);
+    }
+    return res.json({
+      sponsorId: sponsors[0].sponsor_id,
+      sponsorName: sponsors[0].name,
+      pointConversionRate: Number(sponsors[0].point_conversion_rate),
+      pointBalance,
+      products: rows.map((row) => sponsorCatalogProduct(row, sponsors[0].point_conversion_rate)),
+      stale,
+    });
+  } catch (error) {
+    return sendCatalogError(res, error, 'Sponsor catalog lookup failed', 'Unable to load this catalog.');
+  }
+});
+
+app.post('/api/sponsors/:sponsorId/catalog', requireRole('sponsor'), requireOwnCatalog, async (req, res) => {
+  const productId = parseId(req.body?.productId);
+  const { categoryTag, error: tagError } = parseCategoryTag(req.body?.categoryTag);
+  if (!productId) return res.status(400).json({ message: 'Choose a valid product.' });
+  if (tagError) return res.status(400).json({ message: tagError });
+
+  try {
+    await refreshCatalogCacheIfStale();
+    const [products] = await pool.execute(
+      `SELECT p.product_id, p.title, p.price, p.description, p.category, p.image_url
+       FROM cached_products p WHERE p.product_id = ?`,
+      [productId],
+    );
+    if (!products[0]) return res.status(404).json({ message: 'No product found with that id.' });
+
+    await pool.execute(
+      'INSERT INTO sponsor_catalog (sponsor_id, product_id, category_tag) VALUES (?, ?, ?)',
+      [req.catalogSponsorId, productId, categoryTag],
+    );
+    return res.status(201).json({ product: { ...catalogProduct(products[0]), categoryTag } });
+  } catch (error) {
+    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ message: 'That product is already in your catalog.' });
+    return sendCatalogError(res, error, 'Catalog product add failed', 'Unable to add the product to your catalog.');
+  }
+});
+
+app.patch('/api/sponsors/:sponsorId/catalog/:productId', requireRole('sponsor'), requireOwnCatalog, async (req, res) => {
+  const productId = parseId(req.params.productId);
+  const { categoryTag, error: tagError } = parseCategoryTag(req.body?.categoryTag);
+  if (!productId) return res.status(400).json({ message: 'Choose a valid product.' });
+  if (tagError) return res.status(400).json({ message: tagError });
+
+  try {
+    const [result] = await pool.execute(
+      'UPDATE sponsor_catalog SET category_tag = ? WHERE sponsor_id = ? AND product_id = ?',
+      [categoryTag, req.catalogSponsorId, productId],
+    );
+    if (!result.affectedRows) return res.status(404).json({ message: 'That product is not in your catalog.' });
+    return res.json({ productId, categoryTag });
+  } catch (error) {
+    console.error('Catalog tag update failed:', error.message);
+    return res.status(500).json({ message: 'Unable to save the category tag.' });
+  }
+});
+
+app.delete('/api/sponsors/:sponsorId/catalog/:productId', requireRole('sponsor'), requireOwnCatalog, async (req, res) => {
+  const productId = parseId(req.params.productId);
+  if (!productId) return res.status(400).json({ message: 'Choose a valid product.' });
+
+  try {
+    const [result] = await pool.execute(
+      'DELETE FROM sponsor_catalog WHERE sponsor_id = ? AND product_id = ?',
+      [req.catalogSponsorId, productId],
+    );
+    if (!result.affectedRows) return res.status(404).json({ message: 'That product is not in your catalog.' });
+    return res.status(204).end();
+  } catch (error) {
+    console.error('Catalog product removal failed:', error.message);
+    return res.status(500).json({ message: 'Unable to remove the product from your catalog.' });
+  }
+});
+
+// Re-fetches one catalog product from the provider instead of trusting the
+// cache, for checkout to call right before it charges points. The cached row
+// is updated, but not its fetched_at: that tracks the last full list refresh.
+app.get('/api/sponsors/:sponsorId/catalog/:productId/live', requireRole('driver', 'sponsor', 'admin'), requireCatalogViewer, async (req, res) => {
+  const productId = parseId(req.params.productId);
+  if (!productId) return res.status(400).json({ message: 'Choose a valid product.' });
+
+  try {
+    const [rows] = await pool.execute(
+      `SELECT p.product_id, p.title, p.price, p.description, p.category, p.image_url, sc.category_tag,
+              s.point_conversion_rate
+       FROM sponsor_catalog sc
+       JOIN cached_products p ON p.product_id = sc.product_id
+       JOIN sponsors s ON s.sponsor_id = sc.sponsor_id
+       WHERE sc.sponsor_id = ? AND sc.product_id = ?`,
+      [req.catalogSponsorId, productId],
+    );
+    if (!rows[0]) return res.status(404).json({ message: 'That product is not in this sponsor\'s catalog.' });
+
+    const live = await fetchProduct(productId);
+    if (!live) {
+      return res.json({ available: false, cachedPrice: Number(rows[0].price), product: null, priceChanged: false });
+    }
+    await pool.execute(
+      `UPDATE cached_products SET title = ?, price = ?, description = ?, category = ?, image_url = ?
+       WHERE product_id = ?`,
+      [live.title, live.price, live.description, live.category, live.imageUrl, productId],
+    );
+    const product = sponsorCatalogProduct({
+      product_id: live.productId,
+      title: live.title,
+      price: live.price,
+      description: live.description,
+      category: live.category,
+      image_url: live.imageUrl,
+      category_tag: rows[0].category_tag,
+    }, rows[0].point_conversion_rate);
+    return res.json({
+      available: true,
+      cachedPrice: Number(rows[0].price),
+      priceChanged: Number(rows[0].price) !== live.price,
+      product,
+    });
+  } catch (error) {
+    return sendCatalogError(res, error, 'Live product check failed', 'Unable to confirm this product right now.');
+  }
+});
+
+// Sponsor bulk user upload. A sponsor submits a CSV of drivers and sponsor
+// users for its own organization. Every row is normalized, then validated with
+// the same rules as single account creation; if any row is invalid, nothing is
+// written and every bad row is reported. Valid batches are inserted in one
+// transaction. bcrypt at cost 12 takes ~0.25s per row and the Lambda timeout
+// is 10s, which is what caps the batch size.
+const BULK_UPLOAD_MAX_ROWS = 15;
+const BULK_UPLOAD_COLUMNS = {
+  email: 'email',
+  firstname: 'firstName',
+  lastname: 'lastName',
+  role: 'role',
+  password: 'password',
+  sponsorid: 'sponsorId',
+};
+const BULK_UPLOAD_REQUIRED = ['email', 'firstName', 'lastName', 'role', 'password'];
+const BULK_UPLOAD_HEADERS = { email: 'email', firstName: 'first_name', lastName: 'last_name', role: 'role', password: 'password' };
+
+// Minimal RFC 4180 parsing: comma separated, double-quoted fields may contain
+// commas and line breaks, "" inside quotes is a literal quote, CRLF or LF.
+const parseCsv = (text) => {
+  const records = [];
+  let record = [];
+  let field = '';
+  let quoted = false;
+  const input = text.replace(/^﻿/, '');
+  for (let i = 0; i < input.length; i += 1) {
+    const character = input[i];
+    if (quoted) {
+      if (character !== '"') field += character;
+      else if (input[i + 1] === '"') {
+        field += '"';
+        i += 1;
+      } else quoted = false;
+    } else if (character === '"' && field === '') {
+      quoted = true;
+    } else if (character === ',') {
+      record.push(field);
+      field = '';
+    } else if (character === '\n' || character === '\r') {
+      if (character === '\r' && input[i + 1] === '\n') i += 1;
+      record.push(field);
+      records.push(record);
+      record = [];
+      field = '';
+    } else {
+      field += character;
+    }
+  }
+  if (quoted) return { error: 'The file has a quoted value that is never closed.' };
+  if (field !== '' || record.length) {
+    record.push(field);
+    records.push(record);
+  }
+  return { records };
+};
+
+// Uniform formatting for every row: values are trimmed and blank cells become
+// NULL; emails and roles are lowercased; runs of spaces in names collapse.
+// Passwords are kept exactly as typed (only a blank one becomes NULL), since
+// silently changing a password would lock the user out.
+const normalizeBulkUser = (values) => {
+  const clean = (value) => {
+    const trimmed = typeof value === 'string' ? value.trim() : '';
+    return trimmed === '' ? null : trimmed;
+  };
+  const name = (value) => clean(value)?.replace(/\s+/g, ' ') ?? null;
+  return {
+    email: clean(values.email)?.toLowerCase() ?? null,
+    firstName: name(values.firstName),
+    lastName: name(values.lastName),
+    role: clean(values.role)?.toLowerCase() ?? null,
+    password: typeof values.password === 'string' && values.password.trim() !== '' ? values.password : null,
+    sponsorId: clean(values.sponsorId),
+  };
+};
+
+app.post('/api/sponsor/users/bulk', requireRole('sponsor'), async (req, res) => {
+  const csv = req.body?.csv;
+  if (typeof csv !== 'string' || !csv.trim()) {
+    return res.status(400).json({ message: 'Upload a CSV file with a header row and at least one user.' });
+  }
+
+  const { records, error: parseError } = parseCsv(csv);
+  if (parseError) return res.status(400).json({ message: parseError });
+
+  const header = records[0].map((name) => name.trim().toLowerCase().replace(/[\s_-]/g, ''));
+  // Blank header cells (e.g. trailing commas from a spreadsheet export) are ignored.
+  const unknown = records[0].filter((name, index) => header[index] && !BULK_UPLOAD_COLUMNS[header[index]]);
+  const fields = header.map((name) => BULK_UPLOAD_COLUMNS[name]);
+  const missing = BULK_UPLOAD_REQUIRED.filter((field) => !fields.includes(field));
+  if (unknown.length || missing.length) {
+    return res.status(400).json({
+      message: [
+        missing.length && `Missing column(s): ${missing.map((field) => BULK_UPLOAD_HEADERS[field]).join(', ')}.`,
+        unknown.length && `Unknown column(s): ${unknown.join(', ')}.`,
+        'Expected columns: email, first_name, last_name, role, password (sponsor_id optional).',
+      ].filter(Boolean).join(' '),
+    });
+  }
+
+  // Row numbers match the spreadsheet: the header is row 1. Blank lines are skipped.
+  const rows = records
+    .map((values, index) => ({ row: index + 1, values }))
+    .slice(1)
+    .filter(({ values }) => values.some((value) => value.trim() !== ''))
+    .map(({ row, values }) => ({
+      row,
+      user: normalizeBulkUser(Object.fromEntries(fields.map((field, index) => [field, values[index]]))),
+    }));
+  if (!rows.length) return res.status(400).json({ message: 'The file has no users in it.' });
+  if (rows.length > BULK_UPLOAD_MAX_ROWS) {
+    return res.status(400).json({ message: `Upload at most ${BULK_UPLOAD_MAX_ROWS} users at a time (this file has ${rows.length}).` });
+  }
+
+  const sponsorId = Number(req.currentUser.sponsor_id);
+  const errors = [];
+  const seenEmails = new Set();
+  for (const { row, user } of rows) {
+    const rowError = newUserError(user, ['driver', 'sponsor']);
+    if (rowError) errors.push({ row, email: user.email, message: rowError });
+    else if (user.sponsorId !== null && Number(user.sponsorId) !== sponsorId) {
+      errors.push({ row, email: user.email, message: 'Users can only be added to your own sponsor organization.' });
+    } else if (seenEmails.has(user.email)) {
+      errors.push({ row, email: user.email, message: 'This email appears more than once in the file.' });
+    }
+    if (user.email) seenEmails.add(user.email);
+  }
+
+  try {
+    const emails = [...seenEmails];
+    if (emails.length) {
+      const [existing] = await pool.execute(
+        `SELECT email FROM users WHERE email IN (${emails.map(() => '?').join(', ')})`,
+        emails,
+      );
+      const taken = new Set(existing.map((user) => user.email.toLowerCase()));
+      for (const { row, user } of rows) {
+        if (taken.has(user.email) && !errors.some((error) => error.row === row)) {
+          errors.push({ row, email: user.email, message: 'An account with this email already exists.' });
+        }
+      }
+    }
+    if (errors.length) {
+      return res.status(400).json({
+        message: 'No users were created. Fix the rows below and upload the file again.',
+        errors: errors.sort((left, right) => left.row - right.row),
+      });
+    }
+
+    const hashed = [];
+    for (const { row, user } of rows) hashed.push({ row, user, passwordHash: await hashPassword(user.password) });
+
+    const connection = await pool.getConnection();
+    const created = [];
+    try {
+      await connection.beginTransaction();
+      for (const { row, user, passwordHash } of hashed) {
+        const [result] = await connection.execute(
+          `INSERT INTO users (email, password_hash, role, first_name, last_name, sponsor_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+          [user.email, passwordHash, user.role, user.firstName, user.lastName, user.role === 'sponsor' ? sponsorId : null],
+        );
+        // Drivers join the uploading sponsor's program the same way an approved
+        // application would leave them.
+        if (user.role === 'driver') {
+          await connection.execute(
+            "INSERT INTO driver_applications (driver_user_id, sponsor_id, status, decided_at) VALUES (?, ?, 'approved', NOW())",
+            [result.insertId, sponsorId],
+          );
+        }
+        created.push({ row, id: result.insertId, email: user.email, role: user.role, firstName: user.firstName, lastName: user.lastName });
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+    return res.status(201).json({ created, count: created.length });
+  } catch (error) {
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ message: 'One of these emails was registered while uploading. No users were created; please upload again.' });
+    }
+    console.error('Bulk user upload failed:', error.message);
+    return res.status(500).json({ message: 'Unable to create these users. No users were created.' });
   }
 });
 

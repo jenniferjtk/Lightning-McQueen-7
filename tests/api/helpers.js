@@ -7,7 +7,14 @@ import request from 'supertest';
 //
 //   vi.mock('mysql2/promise', () => mysqlMock);
 //   const { app } = await import('../../index.js');
-export const db = { execute: vi.fn() };
+export const db = {
+  execute: vi.fn(),
+  getConnection: vi.fn(async () => db),
+  beginTransaction: vi.fn(),
+  commit: vi.fn(),
+  rollback: vi.fn(),
+  release: vi.fn(),
+};
 export const mysqlMock = { default: { createPool: () => db } };
 
 // Answers each query with the first handler whose text appears in the SQL.
