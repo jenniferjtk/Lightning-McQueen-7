@@ -76,6 +76,28 @@ const adminDriver = (user) => ({
 
 const validEmail = (email) => typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
+// Shared by every route that creates an account (admin create, sponsor bulk
+// upload), so they all enforce the same rules. Returns an error message, or
+// null when the fields are valid.
+const newUserError = ({ email, password, firstName, lastName, role }, allowedRoles) => {
+  if (!allowedRoles.includes(role)) {
+    const roleList = allowedRoles.length > 2
+      ? `${allowedRoles.slice(0, -1).join(', ')}, or ${allowedRoles.at(-1)}`
+      : allowedRoles.join(' or ');
+    return `Choose a ${roleList} role.`;
+  }
+  if (!validEmail(email) || typeof password !== 'string' || !password ||
+      typeof firstName !== 'string' || !firstName.trim() ||
+      typeof lastName !== 'string' || !lastName.trim()) {
+    return 'A first name, last name, valid email, and password are required.';
+  }
+  if (password.length < 8) return 'Password must be at least 8 characters.';
+  if (Buffer.byteLength(password, 'utf8') > 72) return 'Password must be 72 bytes or fewer.';
+  return null;
+};
+
+const hashPassword = (password) => bcrypt.hash(password, 12);
+
 const requireRuleManager = async (req, res, next) => {
   if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
   try {
@@ -424,20 +446,10 @@ app.get('/api/admin/sponsor-applications', requireAdmin, async (req, res) => {
 
 app.post('/api/admin/users', requireAdmin, async (req, res) => {
   const { email, password, firstName, lastName, role } = req.body || {};
-  if (!['driver', 'admin', 'sponsor'].includes(role)) {
-    return res.status(400).json({ message: 'Choose a driver, admin, or sponsor role.' });
-  }
-  if (!validEmail(email) || typeof password !== 'string' || !password ||
-      typeof firstName !== 'string' || !firstName.trim() ||
-      typeof lastName !== 'string' || !lastName.trim()) {
-    return res.status(400).json({ message: 'A first name, last name, valid email, and password are required.' });
-  }
-  if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters.' });
-  if (Buffer.byteLength(password, 'utf8') > 72) {
-    return res.status(400).json({ message: 'Password must be 72 bytes or fewer.' });
-  }
+  const validationError = newUserError({ email, password, firstName, lastName, role }, ['driver', 'admin', 'sponsor']);
+  if (validationError) return res.status(400).json({ message: validationError });
   try {
-    const passwordHash = await bcrypt.hash(password, 12);
+    const passwordHash = await hashPassword(password);
     const [result] = await pool.execute(
       `INSERT INTO users (email, password_hash, role, first_name, last_name, created_at)
        VALUES (?, ?, ?, ?, ?, NOW())`,
@@ -1255,10 +1267,24 @@ app.get('/api/sponsors/:sponsorId/catalog', requireRole('driver', 'sponsor', 'ad
        ORDER BY COALESCE(sc.category_tag, p.category), p.title`,
       [req.catalogSponsorId],
     );
+    // A driver's points are earned per sponsor (each rule belongs to one), so
+    // the balance shown beside a catalog only counts this sponsor's rules.
+    let pointBalance = null;
+    if (req.currentUser.role === 'driver') {
+      const [[balance]] = await pool.execute(
+        `SELECT COALESCE(SUM(r.pt_value), 0) AS points
+         FROM point_audit_log l
+         JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+         WHERE l.affected_user_id = ? AND r.sponsor_id = ?`,
+        [req.currentUser.user_id, req.catalogSponsorId],
+      );
+      pointBalance = Number(balance?.points || 0);
+    }
     return res.json({
       sponsorId: sponsors[0].sponsor_id,
       sponsorName: sponsors[0].name,
       pointConversionRate: Number(sponsors[0].point_conversion_rate),
+      pointBalance,
       products: rows.map((row) => sponsorCatalogProduct(row, sponsors[0].point_conversion_rate)),
       stale,
     });
@@ -1374,6 +1400,196 @@ app.get('/api/sponsors/:sponsorId/catalog/:productId/live', requireRole('driver'
     });
   } catch (error) {
     return sendCatalogError(res, error, 'Live product check failed', 'Unable to confirm this product right now.');
+  }
+});
+
+// Sponsor bulk user upload. A sponsor submits a CSV of drivers and sponsor
+// users for its own organization. Every row is normalized, then validated with
+// the same rules as single account creation; if any row is invalid, nothing is
+// written and every bad row is reported. Valid batches are inserted in one
+// transaction. bcrypt at cost 12 takes ~0.25s per row and the Lambda timeout
+// is 10s, which is what caps the batch size.
+const BULK_UPLOAD_MAX_ROWS = 15;
+const BULK_UPLOAD_COLUMNS = {
+  email: 'email',
+  firstname: 'firstName',
+  lastname: 'lastName',
+  role: 'role',
+  password: 'password',
+  sponsorid: 'sponsorId',
+};
+const BULK_UPLOAD_REQUIRED = ['email', 'firstName', 'lastName', 'role', 'password'];
+const BULK_UPLOAD_HEADERS = { email: 'email', firstName: 'first_name', lastName: 'last_name', role: 'role', password: 'password' };
+
+// Minimal RFC 4180 parsing: comma separated, double-quoted fields may contain
+// commas and line breaks, "" inside quotes is a literal quote, CRLF or LF.
+const parseCsv = (text) => {
+  const records = [];
+  let record = [];
+  let field = '';
+  let quoted = false;
+  const input = text.replace(/^﻿/, '');
+  for (let i = 0; i < input.length; i += 1) {
+    const character = input[i];
+    if (quoted) {
+      if (character !== '"') field += character;
+      else if (input[i + 1] === '"') {
+        field += '"';
+        i += 1;
+      } else quoted = false;
+    } else if (character === '"' && field === '') {
+      quoted = true;
+    } else if (character === ',') {
+      record.push(field);
+      field = '';
+    } else if (character === '\n' || character === '\r') {
+      if (character === '\r' && input[i + 1] === '\n') i += 1;
+      record.push(field);
+      records.push(record);
+      record = [];
+      field = '';
+    } else {
+      field += character;
+    }
+  }
+  if (quoted) return { error: 'The file has a quoted value that is never closed.' };
+  if (field !== '' || record.length) {
+    record.push(field);
+    records.push(record);
+  }
+  return { records };
+};
+
+// Uniform formatting for every row: values are trimmed and blank cells become
+// NULL; emails and roles are lowercased; runs of spaces in names collapse.
+// Passwords are kept exactly as typed (only a blank one becomes NULL), since
+// silently changing a password would lock the user out.
+const normalizeBulkUser = (values) => {
+  const clean = (value) => {
+    const trimmed = typeof value === 'string' ? value.trim() : '';
+    return trimmed === '' ? null : trimmed;
+  };
+  const name = (value) => clean(value)?.replace(/\s+/g, ' ') ?? null;
+  return {
+    email: clean(values.email)?.toLowerCase() ?? null,
+    firstName: name(values.firstName),
+    lastName: name(values.lastName),
+    role: clean(values.role)?.toLowerCase() ?? null,
+    password: typeof values.password === 'string' && values.password.trim() !== '' ? values.password : null,
+    sponsorId: clean(values.sponsorId),
+  };
+};
+
+app.post('/api/sponsor/users/bulk', requireRole('sponsor'), async (req, res) => {
+  const csv = req.body?.csv;
+  if (typeof csv !== 'string' || !csv.trim()) {
+    return res.status(400).json({ message: 'Upload a CSV file with a header row and at least one user.' });
+  }
+
+  const { records, error: parseError } = parseCsv(csv);
+  if (parseError) return res.status(400).json({ message: parseError });
+
+  const header = records[0].map((name) => name.trim().toLowerCase().replace(/[\s_-]/g, ''));
+  // Blank header cells (e.g. trailing commas from a spreadsheet export) are ignored.
+  const unknown = records[0].filter((name, index) => header[index] && !BULK_UPLOAD_COLUMNS[header[index]]);
+  const fields = header.map((name) => BULK_UPLOAD_COLUMNS[name]);
+  const missing = BULK_UPLOAD_REQUIRED.filter((field) => !fields.includes(field));
+  if (unknown.length || missing.length) {
+    return res.status(400).json({
+      message: [
+        missing.length && `Missing column(s): ${missing.map((field) => BULK_UPLOAD_HEADERS[field]).join(', ')}.`,
+        unknown.length && `Unknown column(s): ${unknown.join(', ')}.`,
+        'Expected columns: email, first_name, last_name, role, password (sponsor_id optional).',
+      ].filter(Boolean).join(' '),
+    });
+  }
+
+  // Row numbers match the spreadsheet: the header is row 1. Blank lines are skipped.
+  const rows = records
+    .map((values, index) => ({ row: index + 1, values }))
+    .slice(1)
+    .filter(({ values }) => values.some((value) => value.trim() !== ''))
+    .map(({ row, values }) => ({
+      row,
+      user: normalizeBulkUser(Object.fromEntries(fields.map((field, index) => [field, values[index]]))),
+    }));
+  if (!rows.length) return res.status(400).json({ message: 'The file has no users in it.' });
+  if (rows.length > BULK_UPLOAD_MAX_ROWS) {
+    return res.status(400).json({ message: `Upload at most ${BULK_UPLOAD_MAX_ROWS} users at a time (this file has ${rows.length}).` });
+  }
+
+  const sponsorId = Number(req.currentUser.sponsor_id);
+  const errors = [];
+  const seenEmails = new Set();
+  for (const { row, user } of rows) {
+    const rowError = newUserError(user, ['driver', 'sponsor']);
+    if (rowError) errors.push({ row, email: user.email, message: rowError });
+    else if (user.sponsorId !== null && Number(user.sponsorId) !== sponsorId) {
+      errors.push({ row, email: user.email, message: 'Users can only be added to your own sponsor organization.' });
+    } else if (seenEmails.has(user.email)) {
+      errors.push({ row, email: user.email, message: 'This email appears more than once in the file.' });
+    }
+    if (user.email) seenEmails.add(user.email);
+  }
+
+  try {
+    const emails = [...seenEmails];
+    if (emails.length) {
+      const [existing] = await pool.execute(
+        `SELECT email FROM users WHERE email IN (${emails.map(() => '?').join(', ')})`,
+        emails,
+      );
+      const taken = new Set(existing.map((user) => user.email.toLowerCase()));
+      for (const { row, user } of rows) {
+        if (taken.has(user.email) && !errors.some((error) => error.row === row)) {
+          errors.push({ row, email: user.email, message: 'An account with this email already exists.' });
+        }
+      }
+    }
+    if (errors.length) {
+      return res.status(400).json({
+        message: 'No users were created. Fix the rows below and upload the file again.',
+        errors: errors.sort((left, right) => left.row - right.row),
+      });
+    }
+
+    const hashed = [];
+    for (const { row, user } of rows) hashed.push({ row, user, passwordHash: await hashPassword(user.password) });
+
+    const connection = await pool.getConnection();
+    const created = [];
+    try {
+      await connection.beginTransaction();
+      for (const { row, user, passwordHash } of hashed) {
+        const [result] = await connection.execute(
+          `INSERT INTO users (email, password_hash, role, first_name, last_name, sponsor_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+          [user.email, passwordHash, user.role, user.firstName, user.lastName, user.role === 'sponsor' ? sponsorId : null],
+        );
+        // Drivers join the uploading sponsor's program the same way an approved
+        // application would leave them.
+        if (user.role === 'driver') {
+          await connection.execute(
+            "INSERT INTO driver_applications (driver_user_id, sponsor_id, status, decided_at) VALUES (?, ?, 'approved', NOW())",
+            [result.insertId, sponsorId],
+          );
+        }
+        created.push({ row, id: result.insertId, email: user.email, role: user.role, firstName: user.firstName, lastName: user.lastName });
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+    return res.status(201).json({ created, count: created.length });
+  } catch (error) {
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ message: 'One of these emails was registered while uploading. No users were created; please upload again.' });
+    }
+    console.error('Bulk user upload failed:', error.message);
+    return res.status(500).json({ message: 'Unable to create these users. No users were created.' });
   }
 });
 
