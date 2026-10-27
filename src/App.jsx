@@ -13,7 +13,9 @@ import AdminDriversPage from './components/AdminDriversPage.jsx';
 import SponsorConversionCard from './components/SponsorConversionCard.jsx';
 import SponsorApplicationsPage from './components/SponsorApplicationsPage.jsx';
 import SponsorDriversPage from './components/SponsorDriversPage.jsx';
-import { PointsGainedChart, PointsLostChart, PointsTrendChart } from './components/PointCharts.jsx';
+import {
+  PointsGainedChart, PointsLostChart, PointsTrendChart, SponsorWeeklyPointsChart,
+} from './components/PointCharts.jsx';
 
 const emptyDriver = {
   name: '',
@@ -150,7 +152,11 @@ export default function App() {
         <MyApplicationPage user={user} />
       ) : (
         <main className="dashboard">
-          <div className="dashboard__top">
+          <div className={isSponsor ? 'dashboard__top dashboard__top--sponsor' : 'dashboard__top'}>
+            {isSponsor ? (
+              <SponsorWeeklyPointsChart />
+            ) : (
+              <>
             <div className="dashboard__points-column">
               <PointsCard points={driver.points} />
               <SponsorConversionCard userRole={user.role} />
@@ -206,6 +212,8 @@ export default function App() {
                 )}
               </section>
             </div>
+              </>
+            )}
           </div>
 
           {user.role === 'driver' && (

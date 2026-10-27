@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 
 // How often the "Points lost" chart re-fetches (task 26693).
@@ -9,6 +9,7 @@ export const LOSSES_REFRESH_MS = 30000;
 const GAIN_COLOR = '#1e7a46';
 const LOSS_COLOR = '#b44738';
 const TREND_COLOR = '#3A6EA5';
+const SPONSOR_POINTS_ENDPOINT = '/api/sponsor/points/weekly';
 
 // Loads a point history endpoint, optionally re-fetching every refreshMs.
 // Keeps the last good data on screen if a background refresh fails.
@@ -101,6 +102,28 @@ export function PointsTrendChart({ endpoint = '/api/points/trend', title = 'Poin
           <Tooltip formatter={(value) => [`${value.toLocaleString()} pts`, 'Total']} />
           <Line type="monotone" dataKey="cumulative_total" stroke={TREND_COLOR} strokeWidth={2} dot={{ r: 3 }} />
         </LineChart>
+      </ResponsiveContainer>
+    </ChartCard>
+  );
+}
+
+export function SponsorWeeklyPointsChart() {
+  const { data, error } = usePointData(SPONSOR_POINTS_ENDPOINT);
+  return (
+    <ChartCard title="Your drivers’ point changes over the last 7 days" data={data} error={error}>
+      <ResponsiveContainer width="100%" height={280}>
+        <BarChart data={data} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
+          <CartesianGrid stroke="#E4E0D6" />
+          <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+          <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+          <Tooltip formatter={(value) => [`${value > 0 ? '+' : ''}${value.toLocaleString()} pts`, 'Net change']} />
+          <ReferenceLine y={0} stroke="#5B6B79" />
+          <Bar dataKey="total" name="Net change">
+            {data?.map((entry) => (
+              <Cell key={entry.date} fill={entry.total < 0 ? LOSS_COLOR : GAIN_COLOR} />
+            ))}
+          </Bar>
+        </BarChart>
       </ResponsiveContainer>
     </ChartCard>
   );

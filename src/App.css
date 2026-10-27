@@ -130,6 +130,10 @@ body {
   align-items: stretch;
 }
 
+.dashboard__top--sponsor {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .dashboard__points-column,
 .dashboard__profile-column {
   display: flex;

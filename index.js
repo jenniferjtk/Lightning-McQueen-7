@@ -958,6 +958,42 @@ app.get('/api/sponsor/drivers/:driverUserId/points/trend', requireRole('sponsor'
   }
 });
 
+app.get('/api/sponsor/points/weekly', requireRole('sponsor'), async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT DATE_FORMAT(days.day, '%Y-%m-%d') AS date, COALESCE(changes.total, 0) AS total
+       FROM (
+         SELECT CURDATE() - INTERVAL 6 DAY AS day
+         UNION ALL SELECT CURDATE() - INTERVAL 5 DAY
+         UNION ALL SELECT CURDATE() - INTERVAL 4 DAY
+         UNION ALL SELECT CURDATE() - INTERVAL 3 DAY
+         UNION ALL SELECT CURDATE() - INTERVAL 2 DAY
+         UNION ALL SELECT CURDATE() - INTERVAL 1 DAY
+         UNION ALL SELECT CURDATE()
+       ) days
+       LEFT JOIN (
+         SELECT DATE(l.timestamp) AS day, SUM(r.pt_value) AS total
+         FROM point_audit_log l
+         JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+         WHERE l.affected_user_id IN (
+           SELECT driver_user_id
+           FROM driver_applications
+           WHERE sponsor_id = ? AND status = 'approved'
+         )
+           AND l.timestamp >= CURDATE() - INTERVAL 6 DAY
+           AND l.timestamp < CURDATE() + INTERVAL 1 DAY
+         GROUP BY DATE(l.timestamp)
+       ) changes ON changes.day = days.day
+       ORDER BY days.day`,
+      [req.currentUser.sponsor_id],
+    );
+    return res.json(rows.map((row) => ({ date: row.date, total: Number(row.total) })));
+  } catch (error) {
+    console.error('Sponsor weekly point history lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load weekly sponsor point changes.' });
+  }
+});
+
 // A sponsor applies one of its own point rules to a driver in its program,
 // which writes the point_audit_log row the driver's point charts read. The
 // sponsor comes from the session; the rule supplies the amount and reason so
