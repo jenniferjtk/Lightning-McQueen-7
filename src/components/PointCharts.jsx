@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 
 export const POINTS_REFRESH_MS = 30000;
@@ -114,7 +114,7 @@ export function PointsTrendChart({
 export function SponsorWeeklyPointsChart() {
   const { data, error } = usePointData(
     SPONSOR_POINTS_ENDPOINT,
-    undefined,
+    POINTS_REFRESH_MS,
     "Unable to load your drivers' point changes.",
   );
   return (
@@ -124,13 +124,11 @@ export function SponsorWeeklyPointsChart() {
           <CartesianGrid stroke="#E4E0D6" />
           <XAxis dataKey="date" tick={{ fontSize: 12 }} />
           <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-          <Tooltip formatter={(value) => [`${value > 0 ? '+' : ''}${value.toLocaleString()} pts`, 'Net change']} />
+          <Tooltip formatter={(value, name) => [`${value > 0 ? '+' : ''}${value.toLocaleString()} pts`, name]} />
+          <Legend />
           <ReferenceLine y={0} stroke="#5B6B79" />
-          <Bar dataKey="total" name="Net change">
-            {data?.map((entry) => (
-              <Cell key={entry.date} fill={entry.total < 0 ? LOSS_COLOR : GAIN_COLOR} />
-            ))}
-          </Bar>
+          <Bar dataKey="gains" name="Points earned" fill={GAIN_COLOR} />
+          <Bar dataKey="losses" name="Points lost" fill={LOSS_COLOR} />
         </BarChart>
       </ResponsiveContainer>
     </ChartCard>

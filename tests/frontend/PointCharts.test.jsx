@@ -107,13 +107,13 @@ describe('point charts', () => {
 
   it('loads the sponsor aggregate chart from the weekly point changes endpoint', async () => {
     mockFetch(200, [
-      { date: '2026-10-21', total: 0 },
-      { date: '2026-10-22', total: 20 },
-      { date: '2026-10-23', total: -5 },
-      { date: '2026-10-24', total: 0 },
-      { date: '2026-10-25', total: 15 },
-      { date: '2026-10-26', total: 0 },
-      { date: '2026-10-27', total: 10 },
+      { date: '2026-10-21', gains: 0, losses: 0 },
+      { date: '2026-10-22', gains: 50, losses: -30 },
+      { date: '2026-10-23', gains: 0, losses: -5 },
+      { date: '2026-10-24', gains: 0, losses: 0 },
+      { date: '2026-10-25', gains: 15, losses: 0 },
+      { date: '2026-10-26', gains: 0, losses: 0 },
+      { date: '2026-10-27', gains: 10, losses: 0 },
     ]);
 
     render(<SponsorWeeklyPointsChart />);

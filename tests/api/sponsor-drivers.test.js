@@ -87,7 +87,7 @@ describe('sponsor driver point history', () => {
     mockQueries([
       roleLookup,
       ['FROM driver_applications WHERE driver_user_id = ?', [{ application_id: 44 }]],
-      ['GROUP BY date', [
+      ["GROUP BY DATE_FORMAT(l.timestamp, '%Y-%m-%d')", [
         { date: '2026-09-01', change_amount: '50' },
         { date: '2026-09-03', change_amount: '-30' },
       ]],
@@ -132,32 +132,34 @@ describe('sponsor weekly point changes', () => {
     db.execute.mockClear();
     mockQueries([
       roleLookup,
-      ['FROM (', [
-        { date: '2026-10-21', total: '0' },
-        { date: '2026-10-22', total: '20' },
-        { date: '2026-10-23', total: '-5' },
-        { date: '2026-10-24', total: '0' },
-        { date: '2026-10-25', total: '15' },
-        { date: '2026-10-26', total: '0' },
-        { date: '2026-10-27', total: '10' },
+      ['SELECT DATE_FORMAT(CURDATE()', [{ today: '2026-10-27' }]],
+      ['FROM point_audit_log l', [
+        { date: '2026-10-22', gains: '50', losses: '-30' },
+        { date: '2026-10-23', gains: '0', losses: '-5' },
+        { date: '2026-10-25', gains: '15', losses: '0' },
+        { date: '2026-10-27', gains: '10', losses: '0' },
       ]],
     ]);
 
     const response = await agent.get('/api/sponsor/points/weekly').expect(200);
 
     expect(response.body).toEqual([
-      { date: '2026-10-21', total: 0 },
-      { date: '2026-10-22', total: 20 },
-      { date: '2026-10-23', total: -5 },
-      { date: '2026-10-24', total: 0 },
-      { date: '2026-10-25', total: 15 },
-      { date: '2026-10-26', total: 0 },
-      { date: '2026-10-27', total: 10 },
+      { date: '2026-10-21', gains: 0, losses: 0 },
+      { date: '2026-10-22', gains: 50, losses: -30 },
+      { date: '2026-10-23', gains: 0, losses: -5 },
+      { date: '2026-10-24', gains: 0, losses: 0 },
+      { date: '2026-10-25', gains: 15, losses: 0 },
+      { date: '2026-10-26', gains: 0, losses: 0 },
+      { date: '2026-10-27', gains: 10, losses: 0 },
     ]);
-    const [sql, params] = db.execute.mock.calls[1];
+    const [sql, params] = db.execute.mock.calls[2];
     expect(params).toEqual([users.sponsor.sponsor_id]);
     expect(sql).toContain("status = 'approved'");
-    expect(sql).toContain('INTERVAL 6 DAY');
+    expect(sql).toContain('l.timestamp >= CURDATE() - INTERVAL 6 DAY');
+    expect(sql).toContain('l.timestamp < CURDATE() + INTERVAL 1 DAY');
+    expect(sql).toContain('FROM driver_applications');
+    expect(sql).toContain('SUM(CASE WHEN r.pt_value > 0');
+    expect(sql).toContain('SUM(CASE WHEN r.pt_value < 0');
   });
 
   it('rejects non-sponsor accounts', async () => {

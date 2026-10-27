@@ -32,7 +32,7 @@ const queries = () => [
   ["AND status = 'approved'", ([driverId, sponsorId]) => approvals
     .filter((row) => row.driver_user_id === driverId && row.sponsor_id === sponsorId)
     .map(() => ({ application_id: 1 }))],
-  ['GROUP BY DATE(l.timestamp)', ([driverId]) => {
+  ["GROUP BY DATE_FORMAT(l.timestamp, '%Y-%m-%d')", ([driverId]) => {
     const byDate = {};
     for (const entry of pointLog.filter((row) => row.driverId === driverId)) {
       const rule = rules.find((r) => r.rule_id === entry.ruleId);

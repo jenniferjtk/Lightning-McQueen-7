@@ -29,7 +29,7 @@ const pointQueries = [
   roleLookup,
   ['r.pt_value > 0', ([driverId]) => reasonTotals[driverId]?.gains ?? []],
   ['r.pt_value < 0', ([driverId]) => reasonTotals[driverId]?.losses ?? []],
-  ['GROUP BY DATE(l.timestamp)', ([driverId]) => dailyChanges[driverId] ?? []],
+  ["GROUP BY DATE_FORMAT(l.timestamp, '%Y-%m-%d')", ([driverId]) => dailyChanges[driverId] ?? []],
 ];
 
 beforeEach(() => {
@@ -87,8 +87,8 @@ describe('point history endpoints', () => {
       { date: '2026-09-03', cumulative_total: 20 },
       { date: '2026-09-08', cumulative_total: 95 },
     ]);
-    const [query, params] = db.execute.mock.calls.find(([sql]) => sql.includes('GROUP BY DATE(l.timestamp)'));
-    expect(query).toContain('ORDER BY DATE(l.timestamp)');
+    const [query, params] = db.execute.mock.calls.find(([sql]) => sql.includes("GROUP BY DATE_FORMAT(l.timestamp, '%Y-%m-%d')"));
+    expect(query).toContain("ORDER BY DATE_FORMAT(l.timestamp, '%Y-%m-%d')");
     expect(params).toEqual([users.driver.user_id]);
   });
 

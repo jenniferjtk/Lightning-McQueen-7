@@ -910,8 +910,8 @@ app.get('/api/points/trend', requireRole('driver'), async (req, res) => {
        FROM point_audit_log l
        JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
        WHERE l.affected_user_id = ?
-       GROUP BY DATE(l.timestamp)
-       ORDER BY DATE(l.timestamp)`,
+       GROUP BY DATE_FORMAT(l.timestamp, '%Y-%m-%d')
+       ORDER BY DATE_FORMAT(l.timestamp, '%Y-%m-%d')`,
       [req.currentUser.user_id],
     );
     let runningTotal = 0;
@@ -943,8 +943,8 @@ app.get('/api/sponsor/drivers/:driverUserId/points/trend', requireRole('sponsor'
        FROM point_audit_log l
        JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
        WHERE l.affected_user_id = ?
-       GROUP BY date
-       ORDER BY date`,
+       GROUP BY DATE_FORMAT(l.timestamp, '%Y-%m-%d')
+       ORDER BY DATE_FORMAT(l.timestamp, '%Y-%m-%d')`,
       [driverUserId],
     );
     let runningTotal = 0;
@@ -960,34 +960,40 @@ app.get('/api/sponsor/drivers/:driverUserId/points/trend', requireRole('sponsor'
 
 app.get('/api/sponsor/points/weekly', requireRole('sponsor'), async (req, res) => {
   try {
+    const [[{ today }]] = await pool.execute(
+      "SELECT DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS today",
+    );
     const [rows] = await pool.execute(
-      `SELECT DATE_FORMAT(days.day, '%Y-%m-%d') AS date, COALESCE(changes.total, 0) AS total
-       FROM (
-         SELECT CURDATE() - INTERVAL 6 DAY AS day
-         UNION ALL SELECT CURDATE() - INTERVAL 5 DAY
-         UNION ALL SELECT CURDATE() - INTERVAL 4 DAY
-         UNION ALL SELECT CURDATE() - INTERVAL 3 DAY
-         UNION ALL SELECT CURDATE() - INTERVAL 2 DAY
-         UNION ALL SELECT CURDATE() - INTERVAL 1 DAY
-         UNION ALL SELECT CURDATE()
-       ) days
-       LEFT JOIN (
-         SELECT DATE(l.timestamp) AS day, SUM(r.pt_value) AS total
-         FROM point_audit_log l
-         JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
-         WHERE l.affected_user_id IN (
-           SELECT driver_user_id
-           FROM driver_applications
-           WHERE sponsor_id = ? AND status = 'approved'
-         )
-           AND l.timestamp >= CURDATE() - INTERVAL 6 DAY
-           AND l.timestamp < CURDATE() + INTERVAL 1 DAY
-         GROUP BY DATE(l.timestamp)
-       ) changes ON changes.day = days.day
-       ORDER BY days.day`,
+      `SELECT DATE_FORMAT(l.timestamp, '%Y-%m-%d') AS date,
+              SUM(CASE WHEN r.pt_value > 0 THEN r.pt_value ELSE 0 END) AS gains,
+              SUM(CASE WHEN r.pt_value < 0 THEN r.pt_value ELSE 0 END) AS losses
+       FROM point_audit_log l
+       JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+       WHERE l.affected_user_id IN (
+         SELECT driver_user_id
+         FROM driver_applications
+         WHERE sponsor_id = ? AND status = 'approved'
+       )
+         AND l.timestamp >= CURDATE() - INTERVAL 6 DAY
+         AND l.timestamp < CURDATE() + INTERVAL 1 DAY
+       GROUP BY DATE_FORMAT(l.timestamp, '%Y-%m-%d')
+       ORDER BY DATE_FORMAT(l.timestamp, '%Y-%m-%d')`,
       [req.currentUser.sponsor_id],
     );
-    return res.json(rows.map((row) => ({ date: row.date, total: Number(row.total) })));
+    const changesByDate = new Map(rows.map((row) => [row.date, row]));
+    const lastDate = new Date(`${today}T00:00:00Z`);
+    const week = Array.from({ length: 7 }, (_, index) => {
+      const day = new Date(lastDate);
+      day.setUTCDate(lastDate.getUTCDate() - 6 + index);
+      const date = day.toISOString().slice(0, 10);
+      const changes = changesByDate.get(date);
+      return {
+        date,
+        gains: Number(changes?.gains ?? 0),
+        losses: Number(changes?.losses ?? 0),
+      };
+    });
+    return res.json(week);
   } catch (error) {
     console.error('Sponsor weekly point history lookup failed:', error.message);
     return res.status(500).json({ message: 'Unable to load weekly sponsor point changes.' });
