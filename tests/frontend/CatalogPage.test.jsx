@@ -5,18 +5,40 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import CatalogPage from '../../src/components/CatalogPage.jsx';
 
 const products = [
-  { productId: 1, title: 'Backpack', price: 109.95, pointCost: 10995, description: 'Carries a laptop', category: "men's clothing", displayCategory: 'Bags', imageUrl: null },
-  { productId: 9, title: 'Hard Drive', price: 64, pointCost: 6400, description: 'Stores 2TB', category: 'electronics', displayCategory: 'electronics', imageUrl: null },
+  { productId: 1, title: 'Monitor', price: 599, pointCost: 599, description: 'Full HD display', category: 'electronics', displayCategory: 'Displays', imageUrl: 'https://img/monitor.png' },
+  { productId: 2, title: 'Hard Drive', price: 64, pointCost: 50, description: 'Stores 2TB', category: 'electronics', displayCategory: 'Cab tech', imageUrl: 'https://img/drive.png' },
+  { productId: 3, title: 'Backpack', price: 109.95, pointCost: 110, description: 'Carries a laptop', category: "men's clothing", displayCategory: 'On the road', imageUrl: 'https://img/backpack.png' },
+  { productId: 4, title: 'Jacket', price: 49, pointCost: 75, description: 'Weatherproof jacket', category: "men's clothing", displayCategory: 'Clothing', imageUrl: 'https://img/jacket.png' },
 ];
 
-const stubCatalogApi = () => {
-  const fetchMock = vi.fn(async (url) => ({
-    ok: true,
-    json: async () => ({ sponsorName: url.includes('/10/') ? 'Acme Trucking' : 'Roadrunner Logistics', products, stale: false }),
-  }));
+const sponsors = [
+  { id: 1, name: 'Acme Trucking' },
+  { id: 2, name: 'Roadrunner Logistics' },
+];
+const backpack = products[2];
+const monitor = products[0];
+const hardDrive = products[1];
+const jacket = products[3];
+const bracelet = { productId: 5, title: 'Bracelet', price: 20, pointCost: 20, description: 'A road-trip keepsake', category: 'jewelry', displayCategory: 'Accessories', imageUrl: 'https://img/bracelet.png' };
+const catalogs = {
+  1: { sponsorId: 1, sponsorName: 'Acme Trucking', pointBalance: 110, products, stale: false },
+  2: { sponsorId: 2, sponsorName: 'Roadrunner Logistics', pointBalance: 40, products: [bracelet], stale: false },
+};
+
+const stubCatalogApi = (overrides = {}) => {
+  const fetchMock = vi.fn((url) => {
+    const sponsorId = Number(url.match(/sponsors\/(\d+)\/catalog/)?.[1]);
+    const result = overrides[sponsorId] ?? catalogs[sponsorId];
+    if (result instanceof Error) return Promise.reject(result);
+    return Promise.resolve({ ok: true, status: 200, json: async () => result });
+  });
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
 };
+
+const cardTitles = () => screen.getByRole('list', { name: /rewards$/ })
+  .querySelectorAll('li h3') && [...screen.getByRole('list', { name: /rewards$/ }).querySelectorAll('li h3')]
+    .map((heading) => heading.textContent);
 
 describe('CatalogPage', () => {
   afterEach(() => cleanup());
@@ -25,29 +47,26 @@ describe('CatalogPage', () => {
 
   it('switches sponsor catalogs and displays prices and point costs', async () => {
     const fetchMock = stubCatalogApi();
-    render(<CatalogPage sponsors={[
-      { id: 10, name: 'Acme Trucking' },
-      { id: 20, name: 'Roadrunner Logistics' },
-    ]} userId={5} />);
+    render(<CatalogPage sponsors={sponsors} userId={5} />);
 
-    expect(await screen.findByRole('heading', { name: 'Acme Trucking catalog' })).toBeInTheDocument();
+    await screen.findByRole('list', { name: 'Acme Trucking rewards' });
     expect(screen.getByText('$109.95')).toBeInTheDocument();
-    expect(screen.getByText('10,995 pts')).toBeInTheDocument();
+    expect(within(screen.getByText('Backpack').closest('li')).getByText('110 pts')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: 'Roadrunner Logistics' }));
 
-    expect(await screen.findByRole('heading', { name: 'Roadrunner Logistics catalog' })).toBeInTheDocument();
+    expect(await screen.findByRole('list', { name: 'Roadrunner Logistics rewards' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Order history' })).toBeInTheDocument();
     expect(screen.getByText('No orders yet')).toBeInTheDocument();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sponsors/20/catalog', { credentials: 'include' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sponsors/2/catalog', { credentials: 'include' }));
   });
 
   it('filters catalog products by category and keyword', async () => {
     stubCatalogApi();
-    render(<CatalogPage sponsors={[{ id: 10, name: 'Acme Trucking' }]} />);
+    render(<CatalogPage sponsors={[sponsors[0]]} />);
 
     const backpack = await screen.findByRole('heading', { name: 'Backpack' });
     expect(backpack).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'electronics' } });
+    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'Cab tech' } });
     expect(screen.getByRole('heading', { name: 'Hard Drive' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Backpack' })).not.toBeInTheDocument();
 
@@ -59,12 +78,12 @@ describe('CatalogPage', () => {
 
   it('saves favorites and can show only favorited catalog items', async () => {
     stubCatalogApi();
-    render(<CatalogPage sponsors={[{ id: 10, name: 'Acme Trucking' }]} userId={5} />);
+    render(<CatalogPage sponsors={[sponsors[0]]} userId={5} />);
 
     await screen.findByRole('heading', { name: 'Backpack' });
     fireEvent.click(screen.getByRole('button', { name: 'Add Backpack to favorites' }));
     expect(screen.getByRole('button', { name: 'Remove Backpack from favorites' })).toHaveAttribute('aria-pressed', 'true');
-    expect(JSON.parse(localStorage.getItem('driver-catalog-favorites-5'))).toEqual([1]);
+    expect(JSON.parse(localStorage.getItem('driver-catalog-favorites-5'))).toEqual([backpack.productId]);
 
     fireEvent.click(screen.getByRole('button', { name: 'Favorites only' }));
     expect(screen.getByRole('heading', { name: 'Backpack' })).toBeInTheDocument();
@@ -75,7 +94,7 @@ describe('CatalogPage', () => {
     let releaseAcme;
     vi.stubGlobal('fetch', vi.fn((url) => (url.endsWith('/1/catalog')
       ? new Promise((resolve) => { releaseAcme = () => resolve({ ok: true, status: 200, json: async () => catalogs[1] }); })
-      : Promise.resolve({ ok: true, status: 200, json: async () => catalogs[2] }))));
+      : Promise.resolve({ ok: true, status: 200, json: async () => ({ ...catalogs[2], products: [bracelet] }) }))));
     render(<CatalogPage sponsors={sponsors} />);
 
     fireEvent.click(screen.getByRole('tab', { name: 'Roadrunner Logistics' }));
@@ -87,12 +106,11 @@ describe('CatalogPage', () => {
     expect(screen.queryByText(monitor.title)).not.toBeInTheDocument();
   });
 
-  it('marks which items the driver can afford with this sponsor\'s points', async () => {
+  it('marks which items are affordable using the selected sponsor balance', async () => {
     stubCatalogApi();
     render(<CatalogPage sponsors={sponsors} />);
     await screen.findByRole('list', { name: 'Acme Trucking rewards' });
 
-    // Balance is 110: the backpack costs exactly 110, the monitor 599.
     const backpackCard = screen.getByText(backpack.title).closest('li');
     expect(within(backpackCard).getByText('110 pts')).not.toHaveClass('catalog-cost--over');
     expect(within(backpackCard).queryByText(/Need/)).not.toBeInTheDocument();
@@ -102,7 +120,7 @@ describe('CatalogPage', () => {
     expect(within(monitorCard).getByText('Need 489 more')).toBeInTheDocument();
   });
 
-  it('filters to affordable items and combines that with search and category', async () => {
+  it('combines the affordable filter with search and category', async () => {
     stubCatalogApi();
     render(<CatalogPage sponsors={sponsors} />);
     await screen.findByRole('list', { name: 'Acme Trucking rewards' });
@@ -115,17 +133,16 @@ describe('CatalogPage', () => {
     expect(cardTitles()).toEqual([hardDrive.title]);
 
     fireEvent.change(screen.getByLabelText('Category'), { target: { value: '' } });
-    fireEvent.change(screen.getByLabelText('Search rewards'), { target: { value: 'JACKET' } });
+    fireEvent.change(screen.getByLabelText('Search products'), { target: { value: 'JACKET' } });
     expect(cardTitles()).toEqual([jacket.title]);
   });
 
-  it('shows a no-results message for an impossible filter combination, and clears it', async () => {
+  it('shows an empty-filter state and can clear all filters', async () => {
     stubCatalogApi();
     render(<CatalogPage sponsors={sponsors} />);
     await screen.findByRole('list', { name: 'Acme Trucking rewards' });
 
-    // Only the monitor matches "Full HD", and it costs more than the 110-point balance.
-    fireEvent.change(screen.getByLabelText('Search rewards'), { target: { value: 'Full HD' } });
+    fireEvent.change(screen.getByLabelText('Search products'), { target: { value: 'Full HD' } });
     fireEvent.click(screen.getByLabelText('Only show items I can afford'));
 
     const message = screen.getByRole('status');
@@ -135,64 +152,56 @@ describe('CatalogPage', () => {
 
     fireEvent.click(within(message).getByRole('button', { name: 'Clear filters' }));
     expect(cardTitles()).toHaveLength(4);
-    expect(screen.getByLabelText('Search rewards')).toHaveValue('');
+    expect(screen.getByLabelText('Search products')).toHaveValue('');
     expect(screen.getByLabelText('Only show items I can afford')).not.toBeChecked();
   });
 
-  it('sorts by price in both directions', async () => {
+  it('sorts items by price in either direction and restores featured order', async () => {
     stubCatalogApi();
     render(<CatalogPage sponsors={sponsors} />);
     await screen.findByRole('list', { name: 'Acme Trucking rewards' });
 
     fireEvent.change(screen.getByLabelText('Sort by'), { target: { value: 'price-asc' } });
     expect(cardTitles()).toEqual([jacket.title, hardDrive.title, backpack.title, monitor.title]);
-
     fireEvent.change(screen.getByLabelText('Sort by'), { target: { value: 'price-desc' } });
     expect(cardTitles()).toEqual([monitor.title, backpack.title, hardDrive.title, jacket.title]);
-
     fireEvent.change(screen.getByLabelText('Sort by'), { target: { value: 'featured' } });
-    expect(cardTitles()).toEqual([monitor.title, hardDrive.title, backpack.title, jacket.title]);
+    expect(cardTitles()).toEqual(products.map((product) => product.title));
   });
 
-  it('opens a product detail view with a large image, full description, and cost', async () => {
+  it('opens a product detail view with image, description, sponsor balance, and point cost', async () => {
     stubCatalogApi();
     render(<CatalogPage sponsors={sponsors} />);
     await screen.findByRole('list', { name: 'Acme Trucking rewards' });
 
     fireEvent.click(screen.getByRole('button', { name: `View details for ${backpack.title}` }));
-
     const detail = screen.getByRole('article', { name: backpack.title });
     expect(within(detail).getByRole('img', { name: backpack.title })).toHaveAttribute('src', backpack.imageUrl);
     expect(within(detail).getByText(backpack.description)).toBeInTheDocument();
     expect(within(detail).getByText('On the road')).toBeInTheDocument();
     expect(within(detail).getByText('110 pts')).not.toHaveClass('catalog-cost--over');
-    // The balance stays visible on the detail view.
     expect(screen.getByLabelText('Your point balance')).toHaveTextContent('110 pts');
 
     fireEvent.click(within(detail).getByRole('button', { name: '← Back to catalog' }));
     expect(cardTitles()).toHaveLength(4);
   });
 
-  it('shows the over-budget indicator on the detail view too', async () => {
+  it('shows the over-budget indicator in product details', async () => {
     stubCatalogApi();
     render(<CatalogPage sponsors={sponsors} />);
     await screen.findByRole('list', { name: 'Acme Trucking rewards' });
 
     fireEvent.click(screen.getByRole('button', { name: `View details for ${monitor.title}` }));
-
     const detail = screen.getByRole('article', { name: monitor.title });
     expect(within(detail).getByText('599 pts')).toHaveClass('catalog-cost--over');
     expect(within(detail).getByText('Need 489 more')).toBeInTheDocument();
   });
 
-  it('explains when a sponsor has no rewards yet, when the catalog is unavailable, or when it is stale', async () => {
-    stubCatalogApi({
-      1: { ...catalogs[1], products: [] },
-      2: new Error('The product catalog is unavailable right now. Please try again in a few minutes.'),
-    });
+  it('explains empty, unavailable, and stale sponsor catalogs', async () => {
+    stubCatalogApi({ 1: { ...catalogs[1], products: [] }, 2: new Error('The product catalog is unavailable right now. Please try again in a few minutes.') });
     render(<CatalogPage sponsors={sponsors} />);
 
-    expect(await screen.findByRole('heading', { name: "Acme Trucking hasn't added any rewards yet" })).toBeInTheDocument();
+    expect(await screen.findByText("Acme Trucking hasn't added any rewards yet.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: 'Roadrunner Logistics' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('The product catalog is unavailable right now.');
 
@@ -200,11 +209,10 @@ describe('CatalogPage', () => {
     stubCatalogApi({ 1: { ...catalogs[1], stale: true } });
     render(<CatalogPage sponsors={[sponsors[0]]} />);
     expect(await screen.findByText(/may be out of date/)).toBeInTheDocument();
-    // A single sponsor needs no tabs.
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
   });
 
-  it('shows the no-sponsor state without tabs or requests', () => {
+  it('shows the no-sponsor state without sponsor tabs', () => {
     const fetchMock = stubCatalogApi();
     render(<CatalogPage sponsors={[]} />);
 

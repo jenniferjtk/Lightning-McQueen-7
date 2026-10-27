@@ -15,12 +15,15 @@ const formatPrice = (price) => Number(price).toLocaleString('en-US', { style: 'c
 export default function CatalogPage({ sponsors = [], userId }) {
   const [activeSponsorId, setActiveSponsorId] = useState(sponsors[0]?.id ?? null);
   const [products, setProducts] = useState([]);
+  const [catalogData, setCatalogData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [stale, setStale] = useState(false);
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
   const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [affordableOnly, setAffordableOnly] = useState(false);
+  const [sort, setSort] = useState('featured');
+  const [selectedProductId, setSelectedProductId] = useState(null);
   const [favorites, setFavorites] = useState(() => readFavorites(userId));
 
   useEffect(() => {
@@ -36,14 +39,16 @@ export default function CatalogPage({ sponsors = [], userId }) {
   useEffect(() => {
     if (!activeSponsorId) {
       setProducts([]);
+      setCatalogData(null);
       setLoading(false);
       return undefined;
     }
 
     let active = true;
+    setProducts([]);
+    setCatalogData(null);
     setLoading(true);
     setError('');
-    setStale(false);
     fetch(`/api/sponsors/${activeSponsorId}/catalog`, { credentials: 'include' })
       .then(async (response) => {
         const data = await response.json().catch(() => ({}));
@@ -53,7 +58,7 @@ export default function CatalogPage({ sponsors = [], userId }) {
       .then((data) => {
         if (!active) return;
         setProducts(Array.isArray(data.products) ? data.products : []);
-        setStale(Boolean(data.stale));
+        setCatalogData(data);
       })
       .catch((requestError) => {
         if (active) setError(requestError.message);
@@ -66,18 +71,30 @@ export default function CatalogPage({ sponsors = [], userId }) {
   }, [activeSponsorId]);
 
   const activeSponsor = sponsors.find((sponsor) => Number(sponsor.id) === Number(activeSponsorId));
+  const balance = Number.isFinite(Number(catalogData?.pointBalance)) && catalogData?.pointBalance !== null
+    ? Number(catalogData.pointBalance)
+    : null;
   const categories = [...new Set(products.map((product) => product.displayCategory || product.category).filter(Boolean))].sort();
   const visibleProducts = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
-    return products.filter((product) => {
+    const filtered = products.filter((product) => {
       const productCategory = product.displayCategory || product.category;
       const matchesCategory = !category || productCategory === category;
       const searchableText = `${product.title || ''} ${product.description || ''} ${productCategory || ''}`.toLocaleLowerCase();
       const matchesSearch = !query || searchableText.includes(query);
       const matchesFavorite = !favoritesOnly || favorites.has(product.productId);
-      return matchesCategory && matchesSearch && matchesFavorite;
+      const matchesBalance = !affordableOnly || balance === null || Number(product.pointCost) <= balance;
+      return matchesCategory && matchesSearch && matchesFavorite && matchesBalance;
     });
-  }, [products, search, category, favoritesOnly, favorites]);
+    if (sort === 'price-asc') filtered.sort((left, right) => Number(left.price) - Number(right.price));
+    if (sort === 'price-desc') filtered.sort((left, right) => Number(right.price) - Number(left.price));
+    return filtered;
+  }, [products, search, category, favoritesOnly, favorites, affordableOnly, balance, sort]);
+  const selectedProduct = products.find((product) => product.productId === selectedProductId);
+
+  useEffect(() => {
+    setSelectedProductId(null);
+  }, [activeSponsorId]);
 
   const toggleFavorite = (productId) => {
     setFavorites((current) => {
@@ -123,6 +140,8 @@ export default function CatalogPage({ sponsors = [], userId }) {
                     setCategory('');
                     setSearch('');
                     setFavoritesOnly(false);
+                    setAffordableOnly(false);
+                    setSort('featured');
                   }}
                 >
                   {sponsor.name}
@@ -132,13 +151,13 @@ export default function CatalogPage({ sponsors = [], userId }) {
           )}
         </div>
 
-        {activeSponsor && catalog.status === 'ready' && (
+        {activeSponsor && catalogData && (
           <div className="catalog-balance" aria-label="Your point balance">
-            <span>Your balance with {catalog.data.sponsorName}</span>
+            <span>Your balance with {catalogData.sponsorName || activeSponsor.name}</span>
             <strong>{balance === null ? '—' : `${balance.toLocaleString()} pts`}</strong>
           </div>
         )}
-        {catalog.data?.stale && (
+        {catalogData?.stale && (
           <p className="catalog-message" role="status">Some reward details may be out of date while the product provider is unavailable.</p>
         )}
 
@@ -160,6 +179,14 @@ export default function CatalogPage({ sponsors = [], userId }) {
                   {categories.map((name) => <option key={name} value={name}>{name}</option>)}
                 </select>
               </label>
+              <label>
+                Sort by
+                <select value={sort} onChange={(event) => setSort(event.target.value)}>
+                  <option value="featured">Featured</option>
+                  <option value="price-asc">Price (low to high)</option>
+                  <option value="price-desc">Price (high to low)</option>
+                </select>
+              </label>
               <button
                 className={favoritesOnly ? 'catalog-controls__favorites catalog-controls__favorites--active' : 'catalog-controls__favorites'}
                 type="button"
@@ -168,10 +195,19 @@ export default function CatalogPage({ sponsors = [], userId }) {
               >
                 {favoritesOnly ? 'Showing favorites' : 'Favorites only'}
               </button>
+              {balance !== null && (
+                <label className="catalog-controls__toggle">
+                  <input
+                    type="checkbox"
+                    checked={affordableOnly}
+                    onChange={(event) => setAffordableOnly(event.target.checked)}
+                  />
+                  Only show items I can afford
+                </label>
+              )}
             </div>
           )}
 
-          {stale && <p className="catalog-notice" role="status">Showing saved catalog data; live product information is currently unavailable.</p>}
           {loading ? (
             <p className="catalog-state">Loading rewards...</p>
           ) : error ? (
@@ -183,33 +219,73 @@ export default function CatalogPage({ sponsors = [], userId }) {
               <p>Once a sponsor approves your application, their rewards catalog will appear here.</p>
             </div>
           ) : products.length === 0 ? (
-            <p className="catalog-state">This sponsor has no rewards available yet.</p>
+            <p className="catalog-state">{activeSponsor.name} hasn&apos;t added any rewards yet.</p>
           ) : visibleProducts.length === 0 ? (
-            <p className="catalog-state">No rewards match your search.</p>
-          ) : (
-            <div className="catalog-products">
-              {visibleProducts.map((product) => {
-                const isFavorite = favorites.has(product.productId);
-                return (
-                  <article className="catalog-product" key={product.productId}>
-                    <button
-                      className={isFavorite ? 'catalog-product__favorite catalog-product__favorite--active' : 'catalog-product__favorite'}
-                      type="button"
-                      aria-label={isFavorite ? `Remove ${product.title} from favorites` : `Add ${product.title} to favorites`}
-                      aria-pressed={isFavorite}
-                      onClick={() => toggleFavorite(product.productId)}
-                    >
-                      <span aria-hidden="true">{isFavorite ? '★' : '☆'}</span>
-                    </button>
-                    {product.imageUrl ? <img className="catalog-product__image" src={product.imageUrl} alt={product.title} /> : <div className="catalog-product__image catalog-product__image--empty" aria-hidden="true">★</div>}
-                    <p className="catalog-product__category">{product.displayCategory || product.category}</p>
-                    <h3>{product.title}</h3>
-                    <p className="catalog-product__price">{formatPrice(product.price)}</p>
-                    <p className="catalog-product__points">{Number(product.pointCost).toLocaleString()} pts</p>
-                  </article>
-                );
-              })}
+            <div className="catalog-no-results" role="status">
+              <h3>No items match your filters</h3>
+              <p>Clear filters or show items you can&apos;t afford yet.</p>
+              <button type="button" onClick={() => {
+                setSearch('');
+                setCategory('');
+                setFavoritesOnly(false);
+                setAffordableOnly(false);
+              }}>Clear filters</button>
             </div>
+          ) : (
+            selectedProduct ? (
+              <article className="catalog-detail" aria-label={selectedProduct.title}>
+                <button className="catalog-detail__back" type="button" onClick={() => setSelectedProductId(null)}>← Back to catalog</button>
+                <div className="catalog-detail__body">
+                  <div className="catalog-detail__image">
+                    {selectedProduct.imageUrl && <img src={selectedProduct.imageUrl} alt={selectedProduct.title} />}
+                  </div>
+                  <div className="catalog-detail__info">
+                    <p className="catalog-product__category">{selectedProduct.displayCategory || selectedProduct.category}</p>
+                    <h3>{selectedProduct.title}</h3>
+                    <p>{formatPrice(selectedProduct.price)}</p>
+                    <div className="catalog-cost-group">
+                      <span className={balance !== null && Number(selectedProduct.pointCost) > balance ? 'catalog-cost catalog-cost--over' : 'catalog-cost'}>
+                        {Number(selectedProduct.pointCost).toLocaleString()} pts
+                      </span>
+                      {balance !== null && Number(selectedProduct.pointCost) > balance && <span className="catalog-cost__need">Need {(Number(selectedProduct.pointCost) - balance).toLocaleString()} more</span>}
+                    </div>
+                    <p className="catalog-detail__description">{selectedProduct.description}</p>
+                  </div>
+                </div>
+              </article>
+            ) : (
+              <>
+                <p className="catalog-result-count" aria-live="polite">{visibleProducts.length} of {products.length} items match</p>
+                <ul className="catalog-products" aria-label={`${activeSponsor.name} rewards`}>
+                  {visibleProducts.map((product) => {
+                    const isFavorite = favorites.has(product.productId);
+                    const isOverBudget = balance !== null && Number(product.pointCost) > balance;
+                    return (
+                      <li className="catalog-product" key={product.productId}>
+                        <button
+                          className={isFavorite ? 'catalog-product__favorite catalog-product__favorite--active' : 'catalog-product__favorite'}
+                          type="button"
+                          aria-label={isFavorite ? `Remove ${product.title} from favorites` : `Add ${product.title} to favorites`}
+                          aria-pressed={isFavorite}
+                          onClick={() => toggleFavorite(product.productId)}
+                        >
+                          <span aria-hidden="true">{isFavorite ? '★' : '☆'}</span>
+                        </button>
+                        {product.imageUrl ? <img className="catalog-product__image" src={product.imageUrl} alt={product.title} /> : <div className="catalog-product__image catalog-product__image--empty" aria-hidden="true">★</div>}
+                        <p className="catalog-product__category">{product.displayCategory || product.category}</p>
+                        <h3>{product.title}</h3>
+                        <p className="catalog-product__price">{formatPrice(product.price)}</p>
+                        <div className="catalog-cost-group">
+                          <span className={isOverBudget ? 'catalog-cost catalog-cost--over' : 'catalog-cost'}>{Number(product.pointCost).toLocaleString()} pts</span>
+                          {isOverBudget && <span className="catalog-cost__need">Need {(Number(product.pointCost) - balance).toLocaleString()} more</span>}
+                        </div>
+                        <button className="catalog-product__details" type="button" aria-label={`View details for ${product.title}`} onClick={() => setSelectedProductId(product.productId)}>View details</button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            )
           )}
         </div>
       </section>

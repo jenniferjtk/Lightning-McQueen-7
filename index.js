@@ -1450,8 +1450,6 @@ app.get('/api/sponsors/:sponsorId/catalog', requireRole('driver', 'sponsor', 'ad
        ORDER BY COALESCE(sc.category_tag, p.category), p.title`,
       [req.catalogSponsorId],
     );
-    // A driver's points are earned per sponsor (each rule belongs to one), so
-    // the balance shown beside a catalog only counts this sponsor's rules.
     let pointBalance = null;
     if (req.currentUser.role === 'driver') {
       const [[balance]] = await pool.execute(
