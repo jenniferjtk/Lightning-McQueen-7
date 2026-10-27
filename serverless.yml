@@ -28,6 +28,7 @@ package:
     - index.js
     - lambda.js
     - fakeStore.js
+    - fakeStoreSnapshot.js
     - frontend.js
     - package.json
     - dist/**
