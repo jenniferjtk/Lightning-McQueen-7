@@ -317,6 +317,11 @@ app.get('/api/admin/drivers', requireAdmin, async (req, res) => {
   try {
     const [rows] = await pool.execute(
       `SELECT u.user_id, u.email, u.first_name, u.last_name, u.created_at,
+              (SELECT a.sponsor_id
+               FROM driver_applications a
+               WHERE a.driver_user_id = u.user_id AND a.status = 'approved'
+               ORDER BY COALESCE(a.decided_at, a.submitted_at) DESC, a.application_id DESC
+               LIMIT 1) AS sponsor_id,
               GROUP_CONCAT(DISTINCT s.name ORDER BY s.name SEPARATOR ', ') AS affiliation
        FROM users u
        LEFT JOIN driver_applications a ON a.driver_user_id = u.user_id AND a.status = 'approved'
@@ -325,7 +330,11 @@ app.get('/api/admin/drivers', requireAdmin, async (req, res) => {
        GROUP BY u.user_id, u.email, u.first_name, u.last_name, u.created_at
        ORDER BY u.created_at DESC, u.user_id DESC`,
     );
-    return res.json({ drivers: rows.map((driver) => ({ ...adminDriver(driver), affiliation: driver.affiliation || null })) });
+    return res.json({ drivers: rows.map((driver) => ({
+      ...adminDriver(driver),
+      sponsorId: driver.sponsor_id ?? null,
+      affiliation: driver.affiliation || null,
+    })) });
   } catch (error) {
     console.error('Driver list failed:', error.message);
     return res.status(500).json({ message: 'Unable to load driver accounts.' });
@@ -373,6 +382,84 @@ app.put('/api/admin/sponsor-links/:userId', requireAdmin, async (req, res) => {
   } catch (error) {
     console.error('Sponsor account link update failed:', error.message);
     return res.status(500).json({ message: 'Unable to save the sponsor account link.' });
+  }
+});
+
+app.put('/api/admin/drivers/:driverId/affiliation', requireAdmin, async (req, res) => {
+  const driverId = Number(req.params.driverId);
+  const sponsorId = req.body?.sponsorId === null || req.body?.sponsorId === ''
+    ? null
+    : Number(req.body?.sponsorId);
+  if (!Number.isSafeInteger(driverId) || driverId < 1) {
+    return res.status(400).json({ message: 'Invalid driver account.' });
+  }
+  if (sponsorId !== null && (!Number.isSafeInteger(sponsorId) || sponsorId < 1)) {
+    return res.status(400).json({ message: 'Choose a valid sponsor organization.' });
+  }
+
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [drivers] = await connection.execute(
+      "SELECT user_id FROM users WHERE user_id = ? AND role = 'driver' FOR UPDATE",
+      [driverId],
+    );
+    if (!drivers[0]) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Driver account not found.' });
+    }
+
+    if (sponsorId !== null) {
+      const [sponsors] = await connection.execute('SELECT sponsor_id FROM sponsors WHERE sponsor_id = ?', [sponsorId]);
+      if (!sponsors[0]) {
+        await connection.rollback();
+        return res.status(404).json({ message: 'Sponsor organization not found.' });
+      }
+    }
+
+    let selectedApplicationId = null;
+    if (sponsorId !== null) {
+      const [applications] = await connection.execute(
+        `SELECT application_id FROM driver_applications
+         WHERE driver_user_id = ? AND sponsor_id = ? AND status = 'approved'
+         ORDER BY COALESCE(decided_at, submitted_at) DESC, application_id DESC
+         LIMIT 1 FOR UPDATE`,
+        [driverId, sponsorId],
+      );
+      selectedApplicationId = applications[0]?.application_id ?? null;
+    }
+
+    const updateParams = selectedApplicationId === null
+      ? [driverId]
+      : [driverId, selectedApplicationId];
+    await connection.execute(
+      `UPDATE driver_applications
+       SET status = 'rejected', decided_at = NOW()
+       WHERE driver_user_id = ? AND status = 'approved'${selectedApplicationId === null ? '' : ' AND application_id <> ?'}`,
+      updateParams,
+    );
+
+    if (sponsorId !== null && selectedApplicationId === null) {
+      await connection.execute(
+        "INSERT INTO driver_applications (driver_user_id, sponsor_id, status, decided_at) VALUES (?, ?, 'approved', NOW())",
+        [driverId, sponsorId],
+      );
+    }
+    await connection.commit();
+    return res.json({ message: 'Driver sponsor affiliation saved.', sponsorId });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error('Driver sponsor affiliation rollback failed:', rollbackError.message);
+      }
+    }
+    console.error('Driver sponsor affiliation update failed:', error.message);
+    return res.status(500).json({ message: 'Unable to save the driver affiliation.' });
+  } finally {
+    connection?.release();
   }
 });
 
@@ -484,6 +571,28 @@ app.post('/api/admin/users', requireAdmin, async (req, res) => {
     if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ message: 'An account with that email already exists.' });
     console.error('User creation failed:', error.message);
     return res.status(500).json({ message: 'Unable to create the user account.' });
+  }
+});
+
+app.put('/api/admin/users/:userId/role', requireAdmin, async (req, res) => {
+  const userId = Number(req.params.userId);
+  const { role } = req.body || {};
+  if (!Number.isSafeInteger(userId) || userId < 1 || !['driver', 'sponsor'].includes(role)) {
+    return res.status(400).json({ message: 'Choose a valid user account and role.' });
+  }
+  try {
+    const [result] = await pool.execute(
+      `UPDATE users SET role = ?, sponsor_id = NULL
+       WHERE user_id = ? AND role IN ('driver', 'sponsor') AND role <> ?`,
+      [role, userId, role],
+    );
+    if (!result.affectedRows) {
+      return res.status(404).json({ message: 'A driver or sponsor account with a different role was not found.' });
+    }
+    return res.json({ user: { id: userId, role } });
+  } catch (error) {
+    console.error('User role update failed:', error.message);
+    return res.status(500).json({ message: 'Unable to update the user role.' });
   }
 });
 
