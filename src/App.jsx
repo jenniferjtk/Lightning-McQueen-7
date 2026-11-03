@@ -6,6 +6,7 @@ import PurchasesTable from './components/PurchasesTable.jsx';
 import AboutPage from './components/AboutPage.jsx';
 import AccountPage from './components/AccountPage.jsx';
 import PointManagementPage from './components/PointManagementPage.jsx';
+import SponsorReportsPage from './components/SponsorReportsPage.jsx';
 import SponsorsPage from './components/SponsorsPage.jsx';
 import MyApplicationPage from './components/MyApplicationPage.jsx';
 import AdminHomePage from './components/AdminHomePage.jsx';
@@ -45,6 +46,7 @@ export default function App() {
     if (pathname === '/catalog') return 'catalog';
     if (pathname === '/account') return 'account';
     if (pathname === '/points') return 'points';
+    if (pathname === '/reports') return 'reports';
     if (pathname === '/sponsors') return 'sponsors';
     if (pathname === '/application') return 'application';
     if (pathname === '/admin') return 'admin';
@@ -70,6 +72,7 @@ export default function App() {
       catalog: '/catalog',
       account: '/account',
       points: '/points',
+      reports: '/reports',
       sponsors: '/sponsors',
       application: '/application',
       admin: '/admin',
@@ -129,6 +132,7 @@ export default function App() {
   const visiblePage = isPreview
     ? previewRole === 'sponsor' && currentPage === 'dashboard' ? 'sponsor-applications' : currentPage
     : (!isAdmin && adminPages.includes(currentPage)) || (!isSponsor && sponsorPages.includes(currentPage))
+    || (!isAdmin && !isSponsor && currentPage === 'reports')
     ? 'dashboard'
     : currentPage;
 
@@ -174,7 +178,9 @@ export default function App() {
       ) : visiblePage === 'account' ? (
         <AccountPage user={user} sponsors={driver.sponsors} roleOverride={previewRole || null} readOnly={isPreview} onProfileUpdate={handleProfileUpdate} />
       ) : visiblePage === 'points' ? (
-        <PointManagementPage user={previewUser} sponsors={driver.sponsors} readOnly={isPreview} />
+        <PointManagementPage user={previewUser} readOnly={isPreview} />
+      ) : visiblePage === 'reports' ? (
+        <SponsorReportsPage user={previewUser} />
       ) : visiblePage === 'sponsors' ? (
         <SponsorsPage user={previewUser} readOnly={isPreview} />
       ) : visiblePage === 'catalog' ? (
