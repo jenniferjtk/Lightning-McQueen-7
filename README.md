@@ -4,6 +4,9 @@ Team 07's driver rewards app (CPSC 4910). Drivers apply to sponsor programs and
 earn points for good driving; sponsors review applications and manage point
 rules; admins manage driver accounts.
 
+Sponsors and admins can use Reports to view the Sponsor Report's Driver Point
+Tracking with driver and date-range filters, and download the results as CSV.
+
 Live at https://pqo7vj4gc4.execute-api.us-east-2.amazonaws.com/
 
 ## Project structure

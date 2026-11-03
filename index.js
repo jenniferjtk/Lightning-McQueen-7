@@ -1088,6 +1088,72 @@ app.get('/api/sponsor/points/weekly', requireRole('sponsor'), async (req, res) =
   }
 });
 
+app.get('/api/reports/sponsor-points', requireRole('admin', 'sponsor'), async (req, res) => {
+  const { startDate, endDate, driverId = 'all' } = req.query;
+  const isValidDate = (value) => {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const date = new Date(`${value}T00:00:00Z`);
+    return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+  };
+  if (!isValidDate(startDate) || !isValidDate(endDate) || startDate > endDate) {
+    return res.status(400).json({ message: 'Choose a valid date range.' });
+  }
+  const parsedDriverId = typeof driverId === 'string' && /^\d+$/.test(driverId) ? Number(driverId) : null;
+  if (driverId !== 'all' && (!Number.isSafeInteger(parsedDriverId) || parsedDriverId < 1)) {
+    return res.status(400).json({ message: 'Choose a valid driver.' });
+  }
+
+  const conditions = ['l.timestamp >= ?', 'l.timestamp < DATE_ADD(?, INTERVAL 1 DAY)'];
+  const params = [startDate, endDate];
+  if (driverId !== 'all') {
+    conditions.push('u.user_id = ?');
+    params.push(parsedDriverId);
+  }
+  if (req.currentUser.role === 'sponsor') {
+    conditions.push(`EXISTS (
+      SELECT 1 FROM driver_applications a
+      WHERE a.driver_user_id = u.user_id AND a.sponsor_id = ? AND a.status = 'approved'
+    )`);
+    params.push(req.currentUser.sponsor_id);
+  }
+
+  try {
+    const [rows] = await pool.execute(
+      `SELECT u.user_id AS driverId,
+              CONCAT(u.first_name, ' ', u.last_name) AS driverName,
+              COALESCE(balance.total_points, 0) AS totalPoints,
+              r.pt_value AS pointChange,
+              DATE_FORMAT(l.timestamp, '%Y-%m-%d') AS changeDate,
+              CONCAT(actor.first_name, ' ', actor.last_name) AS sponsorName,
+              COALESCE(NULLIF(l.comment, ''), NULLIF(r.description, ''), 'Unspecified') AS reason
+       FROM point_audit_log l
+       JOIN users u ON u.user_id = l.affected_user_id AND u.role = 'driver'
+       JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+       JOIN users actor ON actor.user_id = l.actor_id
+       LEFT JOIN (
+         SELECT l.affected_user_id, SUM(r.pt_value) AS total_points
+         FROM point_audit_log l
+         JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+         GROUP BY l.affected_user_id
+       ) balance ON balance.affected_user_id = u.user_id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY l.timestamp DESC, l.log_id DESC`,
+      params,
+    );
+    return res.json({
+      entries: rows.map((row) => ({
+        ...row,
+        driverId: Number(row.driverId),
+        totalPoints: Number(row.totalPoints),
+        pointChange: Number(row.pointChange),
+      })),
+    });
+  } catch (error) {
+    console.error('Sponsor point report lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load the sponsor point report.' });
+  }
+});
+
 app.post('/api/point-change-reports', requireRole('driver', 'sponsor'), async (req, res) => {
   const pointLogId = Number(req.body?.pointLogId);
   const details = typeof req.body?.details === 'string' ? req.body.details.trim() : '';
