@@ -228,7 +228,7 @@ describe('driver catalog view', () => {
     mockQueries([
       roleLookup,
       approvedFor(SPONSOR_ID, OTHER_SPONSOR_ID),
-      // Points earned under each sponsor's rules: 7000 with one, 50 with the other.
+      // Balance with each sponsor (earned minus orders): 7000 with one, 50 with the other.
       ['AND r.sponsor_id = ?', ([, id]) => [{ points: id === SPONSOR_ID ? '7000' : '50' }]],
       sponsorRow,
       freshCache,
@@ -244,8 +244,8 @@ describe('driver catalog view', () => {
     expect(first.body).toMatchObject({ sponsorId: SPONSOR_ID, sponsorName: `Sponsor ${SPONSOR_ID}`, pointConversionRate: 0.01, pointBalance: 7000, stale: false });
     expect(second.body.pointBalance).toBe(50);
     expect(calls('AND r.sponsor_id = ?').map(([, params]) => params)).toEqual([
-      [users.driver.user_id, SPONSOR_ID],
-      [users.driver.user_id, OTHER_SPONSOR_ID],
+      [users.driver.user_id, SPONSOR_ID, users.driver.user_id, SPONSOR_ID],
+      [users.driver.user_id, OTHER_SPONSOR_ID, users.driver.user_id, OTHER_SPONSOR_ID],
     ]);
     expect(first.body.products).toEqual([{
       productId: 9, title: 'Hard Drive', price: 64, description: 'Stores 2TB', category: 'electronics',
