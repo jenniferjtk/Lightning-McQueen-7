@@ -125,6 +125,19 @@ body {
   gap: 1.5rem;
 }
 
+.negative-points-notice {
+  align-self: flex-start;
+  background: #fff3f1;
+  border: 1px solid #c65a4d;
+  border-radius: 4px;
+  color: #7d2e25;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.45;
+  max-width: 34rem;
+  padding: 0.75rem 0.9rem;
+}
+
 .dashboard__top {
   display: grid;
   grid-template-columns: minmax(0, 1.9fr) minmax(220px, 0.85fr);
@@ -133,7 +146,8 @@ body {
 }
 
 .dashboard__top--sponsor {
-  grid-template-columns: minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
 }
 
 .dashboard__points-column,
@@ -428,6 +442,26 @@ body {
   font-size: 0.82rem;
   color: #8C97A2;
 }
+
+.sponsor-points-backlog__message {
+  color: var(--color-slate);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.sponsor-points-backlog__header { align-items: center; display: flex; gap: 1rem; justify-content: space-between; }
+.sponsor-points-backlog__header .card__title { margin-bottom: 0; }
+.sponsor-points-backlog__toggle { background: transparent; border: 1px solid var(--color-line); border-radius: 4px; color: var(--color-steel); cursor: pointer; flex: 0 0 auto; font: inherit; font-size: 0.8rem; font-weight: 700; padding: 0.45rem 0.65rem; }
+.sponsor-points-backlog__toggle:hover, .sponsor-points-backlog__toggle:focus-visible { border-color: var(--color-steel); }
+.sponsor-points-backlog__table-wrap { overflow-x: auto; }
+.sponsor-points-backlog__table { border-collapse: collapse; font-size: 0.88rem; min-width: 580px; width: 100%; }
+.sponsor-points-backlog__table th { border-bottom: 1px solid var(--color-line); color: var(--color-slate); font-size: 0.78rem; padding: 0 0.5rem 0.65rem; text-align: left; }
+.sponsor-points-backlog__table td { border-bottom: 1px solid var(--color-line); padding: 0.7rem 0.5rem; }
+.sponsor-points-backlog__table th:first-child, .sponsor-points-backlog__table td:first-child { padding-left: 0; }
+.sponsor-points-backlog__table th:last-child, .sponsor-points-backlog__table td:last-child { padding-right: 0; text-align: right; }
+.sponsor-points-backlog__amount { font-family: var(--font-mono); font-weight: 700; white-space: nowrap; }
+.sponsor-points-backlog__amount--positive { color: #1e7a46; }
+.sponsor-points-backlog__amount--negative { color: #b44738; }
 
 .profile-card {
   padding: 1.1rem 1.2rem;

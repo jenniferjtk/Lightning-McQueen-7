@@ -1203,6 +1203,33 @@ app.get('/api/sponsor/points/weekly', requireRole('sponsor'), async (req, res) =
   }
 });
 
+// Full audit backlog for the sponsor's own point rules. Joining through the
+// rule's sponsor_id prevents transactions made by another sponsor from leaking
+// into this organization's dashboard when a driver has multiple affiliations.
+app.get('/api/sponsor/points/transactions', requireRole('sponsor'), async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT l.log_id AS id,
+              CONCAT(driver.first_name, ' ', driver.last_name) AS driverName,
+              COALESCE(NULLIF(l.comment, ''), r.description) AS label,
+              r.pt_value AS amount,
+              DATE_FORMAT(l.timestamp, '%b %e, %Y') AS date
+       FROM point_audit_log l
+       JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+       JOIN users driver ON driver.user_id = l.affected_user_id
+       WHERE r.sponsor_id = ?
+       ORDER BY l.timestamp DESC, l.log_id DESC`,
+      [req.currentUser.sponsor_id],
+    );
+    return res.json({
+      entries: rows.map((entry) => ({ ...entry, amount: Number(entry.amount) })),
+    });
+  } catch (error) {
+    console.error('Sponsor point transaction backlog lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load point transactions.' });
+  }
+});
+
 app.get('/api/reports/sponsor-points', requireRole('admin', 'sponsor'), async (req, res) => {
   const { startDate, endDate, driverId = 'all' } = req.query;
   const isValidDate = (value) => {
