@@ -233,8 +233,8 @@ describe('driver catalog view', () => {
       sponsorRow,
       freshCache,
       ['ORDER BY COALESCE(sc.category_tag', ([id]) => (id === SPONSOR_ID
-        ? [cachedRow(rawProducts[1], { category_tag: 'Tech' })]
-        : [cachedRow(rawProducts[0], { category_tag: null })])],
+        ? [cachedRow(rawProducts[1], { category_tag: 'Tech', stock_quantity: 0 })]
+        : [cachedRow(rawProducts[0], { category_tag: null, stock_quantity: 12 })])],
       ['AND r.sponsor_id = ?', ([, sponsorId]) => [{ points: sponsorId === SPONSOR_ID ? 7000 : 50 }]],
     ]);
 
@@ -249,10 +249,10 @@ describe('driver catalog view', () => {
     ]);
     expect(first.body.products).toEqual([{
       productId: 9, title: 'Hard Drive', price: 64, description: 'Stores 2TB', category: 'electronics',
-      imageUrl: 'https://img/9.png', categoryTag: 'Tech', displayCategory: 'Tech', pointCost: 6400,
+      imageUrl: 'https://img/9.png', categoryTag: 'Tech', displayCategory: 'Tech', pointCost: 6400, stockQuantity: 0,
     }]);
     expect(second.body.products.map((product) => product.productId)).toEqual([1]);
-    expect(second.body.products[0]).toMatchObject({ displayCategory: "men's clothing", pointCost: 10995 });
+    expect(second.body.products[0]).toMatchObject({ displayCategory: "men's clothing", pointCost: 10995, stockQuantity: 12 });
     // The list query reads sponsor_catalog for that one sponsor, never the full product table.
     const listQueries = calls('ORDER BY COALESCE(sc.category_tag');
     expect(listQueries.map(([sql, params]) => [sql.includes('FROM sponsor_catalog sc'), params])).toEqual([[true, [SPONSOR_ID]], [true, [OTHER_SPONSOR_ID]]]);
@@ -264,6 +264,16 @@ describe('driver catalog view', () => {
 
     await agent.get(`/api/sponsors/${OTHER_SPONSOR_ID}/catalog`).expect(403);
     expect(calls('sponsor_catalog')).toHaveLength(0);
+  });
+
+  it('lets a sponsor update stock for its own catalog item and validates the count', async () => {
+    const agent = await signIn(app, users.sponsor);
+    mockQueries([roleLookup, ['UPDATE sponsor_catalog SET stock_quantity', { affectedRows: 1 }]]);
+
+    await agent.patch(`/api/sponsors/${SPONSOR_ID}/catalog/9`).send({ stockQuantity: 0 }).expect(200, { productId: 9, stockQuantity: 0 });
+    expect(db.execute.mock.calls.at(-1)[1]).toEqual([0, SPONSOR_ID, 9]);
+    await agent.patch(`/api/sponsors/${SPONSOR_ID}/catalog/9`).send({ stockQuantity: -1 }).expect(400);
+    await agent.patch(`/api/sponsors/${SPONSOR_ID}/catalog/9`).send({ stockQuantity: 1.5 }).expect(400);
   });
 
   it('lets a sponsor view its own catalog but not another sponsor\'s', async () => {

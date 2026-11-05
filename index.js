@@ -1371,6 +1371,69 @@ app.post('/api/points/apply', requireRole('sponsor'), async (req, res) => {
   }
 });
 
+app.get('/api/driver/shipping-address', requireRole('driver'), async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT shipping_address, shipping_city, shipping_state, shipping_postal_code, shipping_country
+        FROM users u WHERE u.user_id = ?`,
+      [req.currentUser.user_id],
+    );
+    if (!rows[0]) return res.status(404).json({ message: 'Driver account not found.' });
+    return res.json({
+      address: {
+        streetAddress: rows[0].shipping_address || '',
+        city: rows[0].shipping_city || '',
+        state: rows[0].shipping_state || '',
+        zipCode: rows[0].shipping_postal_code || '',
+        country: rows[0].shipping_country || '',
+      },
+    });
+  } catch (error) {
+    console.error('Shipping address lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load your shipping address.' });
+  }
+});
+
+app.put('/api/driver/shipping-address', requireRole('driver'), async (req, res) => {
+  const fields = {
+    streetAddress: req.body?.streetAddress,
+    city: req.body?.city,
+    state: req.body?.state,
+    zipCode: req.body?.zipCode,
+    country: req.body?.country,
+  };
+  const lengths = { streetAddress: 255, city: 100, state: 100, zipCode: 20, country: 100 };
+  for (const [field, value] of Object.entries(fields)) {
+    if (typeof value !== 'string' || value.trim().length > lengths[field]) {
+      return res.status(400).json({ message: 'Enter a valid shipping address.' });
+    }
+  }
+  if (!fields.streetAddress.trim() || !fields.city.trim() || !fields.zipCode.trim() || !fields.country.trim()) {
+    return res.status(400).json({ message: 'Street address, city, ZIP code, and country are required.' });
+  }
+
+  try {
+    await pool.execute(
+      `UPDATE users
+       SET shipping_address = ?, shipping_city = ?, shipping_state = ?, shipping_postal_code = ?, shipping_country = ?
+       WHERE user_id = ?`,
+      [fields.streetAddress.trim(), fields.city.trim(), fields.state.trim(), fields.zipCode.trim(), fields.country.trim(), req.currentUser.user_id],
+    );
+    return res.json({
+      address: {
+        streetAddress: fields.streetAddress.trim(),
+        city: fields.city.trim(),
+        state: fields.state.trim(),
+        zipCode: fields.zipCode.trim(),
+        country: fields.country.trim(),
+      },
+    });
+  } catch (error) {
+    console.error('Shipping address update failed:', error.message);
+    return res.status(500).json({ message: 'Unable to save your shipping address.' });
+  }
+});
+
 // Dashboard data for the signed-in user. Sponsor applications determine the
 // driver's affiliations. The balance and recent updates come from the point log.
 app.get('/api/driver', async (req, res) => {
@@ -1618,7 +1681,7 @@ app.get('/api/sponsors/:sponsorId/catalog', requireRole('driver', 'sponsor', 'ad
 
     const { stale } = await refreshCatalogCacheIfStale();
     const [rows] = await pool.execute(
-      `SELECT p.product_id, p.title, p.price, p.description, p.category, p.image_url, sc.category_tag
+      `SELECT p.product_id, p.title, p.price, p.description, p.category, p.image_url, sc.category_tag, sc.stock_quantity
        FROM sponsor_catalog sc
        JOIN cached_products p ON p.product_id = sc.product_id
        WHERE sc.sponsor_id = ?
@@ -1641,7 +1704,10 @@ app.get('/api/sponsors/:sponsorId/catalog', requireRole('driver', 'sponsor', 'ad
       sponsorName: sponsors[0].name,
       pointConversionRate: Number(sponsors[0].point_conversion_rate),
       pointBalance,
-      products: rows.map((row) => sponsorCatalogProduct(row, sponsors[0].point_conversion_rate)),
+      products: rows.map((row) => ({
+        ...sponsorCatalogProduct(row, sponsors[0].point_conversion_rate),
+        stockQuantity: row.stock_quantity == null ? null : Number(row.stock_quantity),
+      })),
       stale,
     });
   } catch (error) {
@@ -1677,17 +1743,35 @@ app.post('/api/sponsors/:sponsorId/catalog', requireRole('sponsor'), requireOwnC
 
 app.patch('/api/sponsors/:sponsorId/catalog/:productId', requireRole('sponsor'), requireOwnCatalog, async (req, res) => {
   const productId = parseId(req.params.productId);
+  const updatesCategory = Object.hasOwn(req.body || {}, 'categoryTag');
+  const updatesStock = Object.hasOwn(req.body || {}, 'stockQuantity');
   const { categoryTag, error: tagError } = parseCategoryTag(req.body?.categoryTag);
+  const stockQuantity = req.body?.stockQuantity;
   if (!productId) return res.status(400).json({ message: 'Choose a valid product.' });
-  if (tagError) return res.status(400).json({ message: tagError });
+  if (!updatesCategory && !updatesStock) return res.status(400).json({ message: 'Provide a category tag or stock quantity.' });
+  if (updatesCategory && tagError) return res.status(400).json({ message: tagError });
+  if (updatesStock && stockQuantity !== null && (!Number.isSafeInteger(stockQuantity) || stockQuantity < 0)) {
+    return res.status(400).json({ message: 'Stock quantity must be a non-negative whole number or blank.' });
+  }
 
   try {
+    const assignments = [];
+    const params = [];
+    if (updatesCategory) {
+      assignments.push('category_tag = ?');
+      params.push(categoryTag);
+    }
+    if (updatesStock) {
+      assignments.push('stock_quantity = ?');
+      params.push(stockQuantity);
+    }
+    params.push(req.catalogSponsorId, productId);
     const [result] = await pool.execute(
-      'UPDATE sponsor_catalog SET category_tag = ? WHERE sponsor_id = ? AND product_id = ?',
-      [categoryTag, req.catalogSponsorId, productId],
+      `UPDATE sponsor_catalog SET ${assignments.join(', ')} WHERE sponsor_id = ? AND product_id = ?`,
+      params,
     );
     if (!result.affectedRows) return res.status(404).json({ message: 'That product is not in your catalog.' });
-    return res.json({ productId, categoryTag });
+    return res.json({ productId, ...(updatesCategory && { categoryTag }), ...(updatesStock && { stockQuantity }) });
   } catch (error) {
     console.error('Catalog tag update failed:', error.message);
     return res.status(500).json({ message: 'Unable to save the category tag.' });

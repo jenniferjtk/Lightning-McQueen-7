@@ -5,10 +5,10 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import CatalogPage from '../../src/components/CatalogPage.jsx';
 
 const products = [
-  { productId: 1, title: 'Monitor', price: 599, pointCost: 599, description: 'Full HD display', category: 'electronics', displayCategory: 'Displays', imageUrl: 'https://img/monitor.png' },
-  { productId: 2, title: 'Hard Drive', price: 64, pointCost: 50, description: 'Stores 2TB', category: 'electronics', displayCategory: 'Cab tech', imageUrl: 'https://img/drive.png' },
-  { productId: 3, title: 'Backpack', price: 109.95, pointCost: 110, description: 'Carries a laptop', category: "men's clothing", displayCategory: 'On the road', imageUrl: 'https://img/backpack.png' },
-  { productId: 4, title: 'Jacket', price: 49, pointCost: 75, description: 'Weatherproof jacket', category: "men's clothing", displayCategory: 'Clothing', imageUrl: 'https://img/jacket.png' },
+  { productId: 1, title: 'Monitor', price: 599, pointCost: 599, description: 'Full HD display', category: 'electronics', displayCategory: 'Displays', imageUrl: 'https://img/monitor.png', stockQuantity: 0 },
+  { productId: 2, title: 'Hard Drive', price: 64, pointCost: 50, description: 'Stores 2TB', category: 'electronics', displayCategory: 'Cab tech', imageUrl: 'https://img/drive.png', stockQuantity: null },
+  { productId: 3, title: 'Backpack', price: 109.95, pointCost: 110, description: 'Carries a laptop', category: "men's clothing", displayCategory: 'On the road', imageUrl: 'https://img/backpack.png', stockQuantity: 12 },
+  { productId: 4, title: 'Jacket', price: 49, pointCost: 75, description: 'Weatherproof jacket', category: "men's clothing", displayCategory: 'Clothing', imageUrl: 'https://img/jacket.png', stockQuantity: 2 },
 ];
 
 const sponsors = [
@@ -26,7 +26,15 @@ const catalogs = {
 };
 
 const stubCatalogApi = (overrides = {}) => {
-  const fetchMock = vi.fn((url) => {
+  const fetchMock = vi.fn((url, options = {}) => {
+    if (url === '/api/driver/shipping-address' && options.method === 'PUT') {
+      return Promise.resolve({ ok: true, json: async () => ({ address: JSON.parse(options.body) }) });
+    }
+    if (url === '/api/driver/shipping-address') {
+      return Promise.resolve({ ok: true, json: async () => ({ address: {
+        streetAddress: '123 Main Street', city: 'Clemson', state: 'SC', zipCode: '29631', country: 'United States',
+      } }) });
+    }
     const sponsorId = Number(url.match(/sponsors\/(\d+)\/catalog/)?.[1]);
     const result = overrides[sponsorId] ?? catalogs[sponsorId];
     if (result instanceof Error) return Promise.reject(result);
@@ -195,6 +203,36 @@ describe('CatalogPage', () => {
     const detail = screen.getByRole('article', { name: monitor.title });
     expect(within(detail).getByText('599 pts')).toHaveClass('catalog-cost--over');
     expect(within(detail).getByText('Need 489 more')).toBeInTheDocument();
+  });
+
+  it('shows exact stock counts, unknown stock, and an out-of-stock warning', async () => {
+    stubCatalogApi();
+    render(<CatalogPage sponsors={[sponsors[0]]} />);
+
+    await screen.findByRole('list', { name: 'Acme Trucking rewards' });
+    expect(within(screen.getByText('Backpack').closest('li')).getByText('12 in stock')).toBeInTheDocument();
+    expect(within(screen.getByText('Hard Drive').closest('li')).getByText('Stock not set')).toBeInTheDocument();
+    expect(within(screen.getByText('Monitor').closest('li')).getByText('Out of stock')).toBeInTheDocument();
+    expect(within(screen.getByText('Monitor').closest('li')).getByRole('status')).toHaveTextContent('Currently unavailable');
+
+    fireEvent.click(screen.getByRole('button', { name: 'View details for Monitor' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('This item is currently unavailable.');
+  });
+
+  it('loads and securely saves the shipping address from the catalog view', async () => {
+    const fetchMock = stubCatalogApi();
+    render(<CatalogPage sponsors={[sponsors[0]]} userId={55} />);
+
+    expect(await screen.findByLabelText('Street address')).toHaveValue('123 Main Street');
+    fireEvent.change(screen.getByLabelText('Street address'), { target: { value: '45 Delivery Lane' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save shipping address' }));
+
+    expect(await screen.findByText('Delivery address saved securely.')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/driver/shipping-address', expect.objectContaining({
+      method: 'PUT',
+      credentials: 'include',
+      body: expect.stringContaining('45 Delivery Lane'),
+    }));
   });
 
   it('explains empty, unavailable, and stale sponsor catalogs', async () => {
