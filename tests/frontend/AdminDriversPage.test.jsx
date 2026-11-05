@@ -90,7 +90,12 @@ it('searches sponsor rows by organization name', async () => {
     ok: true,
     json: async () => url.endsWith('/drivers')
       ? { drivers: [] }
-      : { sponsors: [
+      : url.endsWith('/sponsor-links')
+        ? {
+          sponsors: [{ sponsor_id: 10, name: 'Acme Freight' }, { sponsor_id: 11, name: 'Blue Line Logistics' }],
+          sponsorUsers: [{ user_id: 2, sponsor_id: 10 }],
+        }
+        : { sponsors: [
         { id: 2, firstName: 'Sam', lastName: 'Sponsor', email: 'sam@example.com', affiliation: 'Acme Freight' },
         { id: 3, firstName: 'Lee', lastName: 'Sponsor', email: 'lee@example.com', affiliation: 'Blue Line Logistics' },
       ] },
@@ -100,6 +105,6 @@ it('searches sponsor rows by organization name', async () => {
   const sponsorRegion = within(await screen.findByRole('region', { name: 'Sponsors' }));
   fireEvent.change(sponsorRegion.getByLabelText('Search sponsors'), { target: { value: 'BLUE LINE' } });
 
-  expect(sponsorRegion.getByRole('cell', { name: 'Blue Line Logistics' })).toBeInTheDocument();
-  expect(sponsorRegion.queryByRole('cell', { name: 'Acme Freight' })).not.toBeInTheDocument();
+  expect(sponsorRegion.getByRole('cell', { name: 'Lee Sponsor' })).toBeInTheDocument();
+  expect(sponsorRegion.queryByRole('cell', { name: 'Sam Sponsor' })).not.toBeInTheDocument();
 });
