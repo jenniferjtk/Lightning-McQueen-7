@@ -16,6 +16,12 @@ export default function AdjustPointsForm({ driverUserId, rules, onApplied }) {
 
   const submit = async (event) => {
     event.preventDefault();
+    const selectedRule = rules.find((rule) => Number(rule.rule_id) === Number(ruleId));
+    const pointChange = Number(selectedRule?.pt_value);
+    if (Number.isFinite(pointChange) && Math.abs(pointChange) >= 100) {
+      const action = pointChange < 0 ? 'remove' : 'add';
+      if (!window.confirm(`Are you sure you want to ${action} ${Math.abs(pointChange).toLocaleString()} points?`)) return;
+    }
     setSubmitting(true);
     setStatus({ type: '', message: '' });
     try {
