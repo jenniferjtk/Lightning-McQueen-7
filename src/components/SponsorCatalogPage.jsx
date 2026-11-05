@@ -16,6 +16,7 @@ export default function SponsorCatalogPage({ user }) {
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState('');
   const [tagDrafts, setTagDrafts] = useState({});
+  const [stockDrafts, setStockDrafts] = useState({});
 
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -36,6 +37,7 @@ export default function SponsorCatalogPage({ user }) {
       .then((data) => {
         setCatalog(data.products);
         setTagDrafts(Object.fromEntries(data.products.map((product) => [product.productId, product.categoryTag || ''])));
+        setStockDrafts(Object.fromEntries(data.products.map((product) => [product.productId, product.stockQuantity ?? ''])));
         setCatalogError('');
       })
       .catch((requestError) => setCatalogError(requestError.message))
@@ -115,6 +117,20 @@ export default function SponsorCatalogPage({ user }) {
     setTagDrafts((current) => ({ ...current, [product.productId]: data.categoryTag || '' }));
   }, `Saved the category tag for "${product.title}".`);
 
+  const saveStock = (product) => runAction(product.productId, async () => {
+    const stockQuantity = stockDrafts[product.productId] === '' ? null : Number(stockDrafts[product.productId]);
+    const data = await readJson(await fetch(`${catalogUrl}/${product.productId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ stockQuantity }),
+    }), 'Unable to save stock quantity.');
+    setCatalog((current) => current.map((item) => (
+      item.productId === product.productId ? { ...item, stockQuantity: data.stockQuantity } : item
+    )));
+    setStockDrafts((current) => ({ ...current, [product.productId]: data.stockQuantity ?? '' }));
+  }, `Saved stock quantity for "${product.title}".`);
+
   return (
     <main className="driver-management-page sponsor-catalog-page">
       <section className="driver-management-page__intro">
@@ -146,6 +162,7 @@ export default function SponsorCatalogPage({ user }) {
                       <th scope="col">Product</th>
                       <th scope="col">Price</th>
                       <th scope="col">Category tag</th>
+                      <th scope="col">Stock quantity</th>
                       <th scope="col"><span className="visually-hidden">Actions</span></th>
                     </tr>
                   </thead>
@@ -159,6 +176,35 @@ export default function SponsorCatalogPage({ user }) {
                           </span>
                         </td>
                         <td>{formatPrice(product.price)}</td>
+                        <td>
+                          <span className="sponsor-catalog__stock">
+                            <input
+                              aria-label={`Stock quantity for ${product.title}`}
+                              type="number"
+                              min="0"
+                              step="1"
+                              inputMode="numeric"
+                              placeholder="Not set"
+                              value={stockDrafts[product.productId] ?? ''}
+                              onChange={(event) => setStockDrafts((current) => ({ ...current, [product.productId]: event.target.value }))}
+                            />
+                            <button
+                              type="button"
+                              aria-label={`Save stock for ${product.title}`}
+                              disabled={busyProductId === product.productId || String(stockDrafts[product.productId] ?? '') === String(product.stockQuantity ?? '')}
+                              onClick={() => saveStock(product)}
+                            >
+                              Save stock
+                            </button>
+                          </span>
+                          <span className="sponsor-catalog__stock-current">
+                            {product.stockQuantity === null || product.stockQuantity === undefined
+                              ? 'Stock not set'
+                              : product.stockQuantity === 0
+                                ? 'Out of stock'
+                                : `${product.stockQuantity} in stock`}
+                          </span>
+                        </td>
                         <td>
                           <span className="sponsor-catalog__tag">
                             <input

@@ -62,8 +62,8 @@ export default function AdminDriversPage() {
   const filteredSponsors = useMemo(() => {
     const query = sponsorSearch.trim().toLowerCase();
     if (!query) return sponsors;
-    return sponsors.filter((sponsor) => [sponsor.firstName, sponsor.lastName, sponsor.email]
-      .some((value) => value.toLowerCase().includes(query)));
+    return sponsors.filter((sponsor) => [sponsor.firstName, sponsor.lastName, sponsor.email, sponsor.affiliation]
+      .some((value) => String(value ?? '').toLowerCase().includes(query)));
   }, [sponsors, sponsorSearch]);
 
   const filteredDrivers = useMemo(() => {
@@ -346,13 +346,13 @@ export default function AdminDriversPage() {
             <h2 className="card__title" id="sponsor-list-title">Sponsors</h2>
             <span className="admin-account-count">{sponsors.length}</span>
           </div>
-          <label className="admin-driver-list__search">Search sponsor users<input type="search" value={sponsorSearch} onChange={(event) => setSponsorSearch(event.target.value)} placeholder="Name or email" /></label>
+          <label className="admin-driver-list__search">Search sponsors<input type="search" value={sponsorSearch} onChange={(event) => setSponsorSearch(event.target.value)} placeholder="Organization, contact, or email" /></label>
         </div>
 
         {sponsorsLoading ? <p className="purchases-card__empty">Loading sponsor users...</p> : sponsorsError ? (
           <p className="admin-drivers-page__message admin-drivers-page__message--error" role="alert">{sponsorsError}</p>
         ) : filteredSponsors.length === 0 ? (
-          <p className="purchases-card__empty">No sponsor accounts match your search.</p>
+          <p className="purchases-card__empty">No sponsors match your search.</p>
         ) : (
           <div className="admin-driver-list__table-wrap">
             <table className="admin-driver-table">

@@ -75,3 +75,22 @@ it('shows driver and sponsor affiliations on the same page', async () => {
   expect(within(screen.getByRole('region', { name: 'Drivers' })).getByText('1', { selector: '.admin-account-count' })).toBeInTheDocument();
   expect(within(screen.getByRole('region', { name: 'Sponsors' })).getByText('1', { selector: '.admin-account-count' })).toBeInTheDocument();
 });
+
+it('searches sponsor rows by organization name', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url) => ({
+    ok: true,
+    json: async () => url.endsWith('/drivers')
+      ? { drivers: [] }
+      : { sponsors: [
+        { id: 2, firstName: 'Sam', lastName: 'Sponsor', email: 'sam@example.com', affiliation: 'Acme Freight' },
+        { id: 3, firstName: 'Lee', lastName: 'Sponsor', email: 'lee@example.com', affiliation: 'Blue Line Logistics' },
+      ] },
+  })));
+  render(<AdminDriversPage />);
+
+  const sponsorRegion = within(await screen.findByRole('region', { name: 'Sponsors' }));
+  fireEvent.change(sponsorRegion.getByLabelText('Search sponsors'), { target: { value: 'BLUE LINE' } });
+
+  expect(sponsorRegion.getByRole('cell', { name: 'Blue Line Logistics' })).toBeInTheDocument();
+  expect(sponsorRegion.queryByRole('cell', { name: 'Acme Freight' })).not.toBeInTheDocument();
+});

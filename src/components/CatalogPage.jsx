@@ -25,6 +25,11 @@ export default function CatalogPage({ sponsors = [], userId }) {
   const [sort, setSort] = useState('featured');
   const [selectedProductId, setSelectedProductId] = useState(null);
   const [favorites, setFavorites] = useState(() => readFavorites(userId));
+  const [shippingAddress, setShippingAddress] = useState({ streetAddress: '', city: '', state: '', zipCode: '', country: '' });
+  const [addressLoading, setAddressLoading] = useState(Boolean(userId));
+  const [addressSaving, setAddressSaving] = useState(false);
+  const [addressError, setAddressError] = useState('');
+  const [addressMessage, setAddressMessage] = useState('');
 
   useEffect(() => {
     if (!sponsors.some((sponsor) => Number(sponsor.id) === Number(activeSponsorId))) {
@@ -34,6 +39,23 @@ export default function CatalogPage({ sponsors = [], userId }) {
 
   useEffect(() => {
     setFavorites(readFavorites(userId));
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return undefined;
+    let active = true;
+    fetch('/api/driver/shipping-address', { credentials: 'include' })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.message || 'Unable to load your shipping address.');
+        return data.address;
+      })
+      .then((address) => {
+        if (active && address) setShippingAddress((current) => ({ ...current, ...address }));
+      })
+      .catch((requestError) => { if (active) setAddressError(requestError.message); })
+      .finally(() => { if (active) setAddressLoading(false); });
+    return () => { active = false; };
   }, [userId]);
 
   useEffect(() => {
@@ -108,6 +130,29 @@ export default function CatalogPage({ sponsors = [], userId }) {
       }
       return updated;
     });
+  };
+
+  const saveShippingAddress = async (event) => {
+    event.preventDefault();
+    setAddressSaving(true);
+    setAddressError('');
+    setAddressMessage('');
+    try {
+      const response = await fetch('/api/driver/shipping-address', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(shippingAddress),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || 'Unable to save your shipping address.');
+      setShippingAddress(data.address);
+      setAddressMessage('Delivery address saved securely.');
+    } catch (requestError) {
+      setAddressError(requestError.message);
+    } finally {
+      setAddressSaving(false);
+    }
   };
 
   return (
@@ -249,6 +294,14 @@ export default function CatalogPage({ sponsors = [], userId }) {
                       </span>
                       {balance !== null && Number(selectedProduct.pointCost) > balance && <span className="catalog-cost__need">Need {(Number(selectedProduct.pointCost) - balance).toLocaleString()} more</span>}
                     </div>
+                    <p className={selectedProduct.stockQuantity === 0 ? 'catalog-stock catalog-stock--empty' : 'catalog-stock'}>
+                      {selectedProduct.stockQuantity === null || selectedProduct.stockQuantity === undefined
+                        ? 'Stock not set'
+                        : selectedProduct.stockQuantity === 0
+                          ? 'Out of stock'
+                          : `${selectedProduct.stockQuantity} in stock`}
+                    </p>
+                    {selectedProduct.stockQuantity === 0 && <p className="catalog-stock-warning" role="alert">This item is currently unavailable.</p>}
                     <p className="catalog-detail__description">{selectedProduct.description}</p>
                   </div>
                 </div>
@@ -279,6 +332,14 @@ export default function CatalogPage({ sponsors = [], userId }) {
                           <span className={isOverBudget ? 'catalog-cost catalog-cost--over' : 'catalog-cost'}>{Number(product.pointCost).toLocaleString()} pts</span>
                           {isOverBudget && <span className="catalog-cost__need">Need {(Number(product.pointCost) - balance).toLocaleString()} more</span>}
                         </div>
+                        <p className={product.stockQuantity === 0 ? 'catalog-stock catalog-stock--empty' : 'catalog-stock'}>
+                          {product.stockQuantity === null || product.stockQuantity === undefined
+                            ? 'Stock not set'
+                            : product.stockQuantity === 0
+                              ? 'Out of stock'
+                              : `${product.stockQuantity} in stock`}
+                        </p>
+                        {product.stockQuantity === 0 && <p className="catalog-stock-warning" role="status">Currently unavailable</p>}
                         <button className="catalog-product__details" type="button" aria-label={`View details for ${product.title}`} onClick={() => setSelectedProductId(product.productId)}>View details</button>
                       </li>
                     );
@@ -288,6 +349,49 @@ export default function CatalogPage({ sponsors = [], userId }) {
             )
           )}
         </div>
+      </section>
+
+      <section className="catalog-section catalog-delivery" aria-labelledby="delivery-address-title">
+        <div className="catalog-section__heading">
+          <div>
+            <p className="catalog-section__eyebrow">Delivery</p>
+            <h2 id="delivery-address-title">Shipping address</h2>
+          </div>
+        </div>
+        <form className="catalog-address-form" onSubmit={saveShippingAddress}>
+          {addressLoading ? (
+            <p className="catalog-state">Loading your saved address...</p>
+          ) : (
+            <>
+              <label className="catalog-address-form__street">
+                Street address
+                <input maxLength={255} autoComplete="street-address" required value={shippingAddress.streetAddress} onChange={(event) => setShippingAddress((current) => ({ ...current, streetAddress: event.target.value }))} />
+              </label>
+              <label>
+                City
+                <input maxLength={100} autoComplete="address-level2" required value={shippingAddress.city} onChange={(event) => setShippingAddress((current) => ({ ...current, city: event.target.value }))} />
+              </label>
+              <label>
+                State / region
+                <input maxLength={100} autoComplete="address-level1" value={shippingAddress.state} onChange={(event) => setShippingAddress((current) => ({ ...current, state: event.target.value }))} />
+              </label>
+              <label>
+                ZIP / postal code
+                <input maxLength={20} autoComplete="postal-code" required value={shippingAddress.zipCode} onChange={(event) => setShippingAddress((current) => ({ ...current, zipCode: event.target.value }))} />
+              </label>
+              <label>
+                Country
+                <input maxLength={100} autoComplete="country-name" required value={shippingAddress.country} onChange={(event) => setShippingAddress((current) => ({ ...current, country: event.target.value }))} />
+              </label>
+              <p className="catalog-address-form__privacy">Only you can view and update this saved address.</p>
+              <button className="catalog-address-form__save" type="submit" disabled={addressSaving}>
+                {addressSaving ? 'Saving...' : 'Save shipping address'}
+              </button>
+            </>
+          )}
+          {addressMessage && <p className="catalog-address-form__message" role="status">{addressMessage}</p>}
+          {addressError && <p className="catalog-address-form__error" role="alert">{addressError}</p>}
+        </form>
       </section>
 
       <section className="catalog-section catalog-orders" aria-labelledby="order-history-title">
