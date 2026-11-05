@@ -89,7 +89,22 @@ driver a few weeks of demo point history for the dashboard charts.
 
 ## Deploy to AWS
 
-From the repo root, with the `.env` above:
+Every push to `main` deploys automatically once the tests pass (the `deploy`
+job in `.github/workflows/test.yml`). It can also be rerun by hand from the
+Actions tab ("Tests" → "Run workflow"). It needs these repository secrets in
+Settings → Secrets and variables → Actions; without them the deploy step is
+skipped:
+
+- `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`: an IAM user allowed to deploy
+  the stack in the CPSC 4910 account
+- `SERVERLESS_ACCESS_KEY`: from the `jennagracejohnson3` Serverless dashboard
+- `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `SESSION_SECRET` (and
+  optionally `DB_PORT`): the same values as `.env`
+
+Migrations are not run by the workflow. Apply new files in
+`backend/db/migrations/` to the database before merging code that needs them.
+
+To deploy by hand instead, from the repo root, with the `.env` above:
 
 ```bash
 set -a && source .env && set +a && npm run deploy
