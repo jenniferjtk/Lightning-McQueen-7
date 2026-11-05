@@ -184,7 +184,11 @@ export default function App() {
       ) : visiblePage === 'sponsors' ? (
         <SponsorsPage user={previewUser} readOnly={isPreview} />
       ) : visiblePage === 'catalog' ? (
-        <CatalogPage sponsors={driver.sponsors} userId={user.id} />
+        <CatalogPage
+          sponsors={driver.sponsors}
+          userId={user.id}
+          onOrderPlaced={(order) => setDriverData((current) => (current ? { ...current, points: Number(current.points) - order.pointCost } : current))}
+        />
       ) : visiblePage === 'application' ? (
         <MyApplicationPage user={previewUser} preview={isPreview} />
       ) : (

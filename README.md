@@ -74,10 +74,13 @@ them on save. GitHub Actions runs the suite and the build on every push to
 Run the files in `backend/db/migrations/` against the database, in order:
 `002_driver_applications.sql`, `003_sponsor_id_on_users.sql`,
 `pt_management.sql`, `004_sessions_table.sql`, and
-`005_point_change_reports.sql`, and `006_shipping_address_and_catalog_stock.sql`.
+`005_point_change_reports.sql`, `006_shipping_address_and_catalog_stock.sql`,
+and `007_orders.sql`.
 The sessions table is required on AWS, where
 logins are stored in MySQL instead of memory. The point-change reports table
-stores driver and sponsor reports for administrator review.
+stores driver and sponsor reports for administrator review. The orders table
+holds catalog redemptions; a driver's balance with a sponsor is the points
+that sponsor awarded minus their orders with it that aren't canceled.
 
 `backend/db/seeds/sponsor_review_test_data.sql` adds a test sponsor and a test
 driver; see the comments at the top of that file for the logins.

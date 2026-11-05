@@ -259,3 +259,156 @@ describe('CatalogPage', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe('CatalogPage checkout', () => {
+  afterEach(() => cleanup());
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); localStorage.clear(); });
+
+  const placed = {
+    orderId: 7, sponsorId: 1, sponsorName: 'Acme Trucking', productId: 2, productTitle: 'Hard Drive',
+    unitPrice: 64, pointCost: 50, status: 'pending', createdAt: '2026-11-04T15:30:00.000Z',
+  };
+  const jsonResponse = (body, status = 200) => Promise.resolve({ ok: status < 400, status, json: async () => body });
+
+  // Wraps the catalog stub with the order endpoints. placeOrder answers each POST.
+  const stubCheckoutApi = ({ orders = [], placeOrder = () => jsonResponse({ order: placed, pointBalance: 60, stockQuantity: null }, 201), address, catalog } = {}) => {
+    const catalogFetch = stubCatalogApi(catalog ? { 1: catalog } : {});
+    const fetchMock = vi.fn((url, options = {}) => {
+      if (url === '/api/orders' && options.method === 'POST') return placeOrder(JSON.parse(options.body));
+      if (url === '/api/orders') return jsonResponse({ orders });
+      if (url === '/api/driver/shipping-address' && !options.method && address) return jsonResponse({ address });
+      return catalogFetch(url, options);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  };
+  const openDetails = async (title) => {
+    fireEvent.click(await screen.findByRole('button', { name: `View details for ${title}` }));
+  };
+  const balanceBanner = () => screen.getByLabelText('Your point balance');
+
+  it('asks the driver to confirm, then places the order and shows a confirmation', async () => {
+    const fetchMock = stubCheckoutApi();
+    const onOrderPlaced = vi.fn();
+    render(<CatalogPage sponsors={[sponsors[0]]} userId={5} onOrderPlaced={onOrderPlaced} />);
+    await openDetails('Hard Drive');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Redeem for 50 pts' }));
+    const dialog = screen.getByRole('dialog', { name: 'Confirm your order' });
+    expect(within(dialog).getByText('Hard Drive')).toBeInTheDocument();
+    expect(within(dialog).getByText('60 pts')).toBeInTheDocument();
+    expect(within(dialog).getByText('123 Main Street, Clemson, SC, 29631, United States')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url, options]) => url === '/api/orders' && options?.method === 'POST')).toBe(false);
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Place order' }));
+
+    expect(await screen.findByRole('heading', { name: 'Order placed' })).toHaveFocus();
+    const post = fetchMock.mock.calls.find(([url, options]) => url === '/api/orders' && options?.method === 'POST');
+    expect(JSON.parse(post[1].body)).toEqual({ sponsorId: 1, productId: 2, expectedPointCost: 50 });
+    expect(screen.getByText('Order #7')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Your order for Hard Drive is confirmed.');
+    // The balance drops right away, with no reload.
+    expect(within(balanceBanner()).getByText('60 pts')).toBeInTheDocument();
+    expect(onOrderPlaced).toHaveBeenCalledWith(placed);
+    const history = screen.getByRole('table');
+    expect(within(history).getByText('Hard Drive')).toBeInTheDocument();
+    expect(within(history).getByText('Nov 4, 2026')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to catalog' }));
+    expect(screen.getByRole('list', { name: 'Acme Trucking rewards' })).toBeInTheDocument();
+  });
+
+  it('cancels the confirmation without placing an order', async () => {
+    const fetchMock = stubCheckoutApi();
+    render(<CatalogPage sponsors={[sponsors[0]]} userId={5} />);
+    await openDetails('Hard Drive');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Redeem for 50 pts' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
+  });
+
+  it('explains how many more points an item needs and blocks the order', async () => {
+    stubCheckoutApi({ catalog: { ...catalogs[1], pointBalance: 60 } });
+    render(<CatalogPage sponsors={[sponsors[0]]} userId={5} />);
+    await openDetails('Backpack');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Redeem for 110 pts' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Not enough points. You need 50 more points to order this item.');
+    expect(screen.getByRole('button', { name: 'Place order' })).toBeDisabled();
+  });
+
+  it('shows the server\'s insufficient-points error and the real balance', async () => {
+    stubCheckoutApi({
+      placeOrder: () => jsonResponse({ message: 'You need 20 more points to order this item.', code: 'INSUFFICIENT_POINTS', pointBalance: 30, pointCost: 50 }, 409),
+    });
+    render(<CatalogPage sponsors={[sponsors[0]]} userId={5} />);
+    await openDetails('Hard Drive');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Redeem for 50 pts' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Place order' }));
+
+    expect(await screen.findByText('You need 20 more points to order this item.')).toBeInTheDocument();
+    expect(within(balanceBanner()).getByText('30 pts')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Order placed' })).not.toBeInTheDocument();
+  });
+
+  it('shows a changed price and confirms again at the new cost', async () => {
+    const posts = [];
+    stubCheckoutApi({
+      placeOrder: (body) => {
+        posts.push(body);
+        return posts.length === 1
+          ? jsonResponse({ message: 'The price changed to 55 points. Review the new cost and confirm again.', code: 'PRICE_CHANGED', pointCost: 55, price: 55 }, 409)
+          : jsonResponse({ order: { ...placed, pointCost: 55 }, pointBalance: 55, stockQuantity: null }, 201);
+      },
+    });
+    render(<CatalogPage sponsors={[sponsors[0]]} userId={5} />);
+    await openDetails('Hard Drive');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Redeem for 50 pts' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Place order' }));
+
+    expect(await screen.findByText('The price changed to 55 points. Review the new cost and confirm again.')).toBeInTheDocument();
+    const dialog = screen.getByRole('dialog', { name: 'Confirm your order' });
+    expect(within(dialog).getAllByText('55 pts')).toHaveLength(2);
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Place order' }));
+    await screen.findByRole('heading', { name: 'Order placed' });
+    expect(posts.map((body) => body.expectedPointCost)).toEqual([50, 55]);
+  });
+
+  it('requires a saved shipping address before ordering', async () => {
+    stubCheckoutApi({ address: { streetAddress: '', city: '', state: '', zipCode: '', country: '' } });
+    render(<CatalogPage sponsors={[sponsors[0]]} userId={5} />);
+    await openDetails('Hard Drive');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Redeem for 50 pts' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Save a shipping address below before placing an order.');
+    expect(screen.getByRole('button', { name: 'Place order' })).toBeDisabled();
+  });
+
+  it('cannot redeem an out-of-stock item', async () => {
+    stubCheckoutApi({ catalog: { ...catalogs[1], pointBalance: 1000 } });
+    render(<CatalogPage sponsors={[sponsors[0]]} userId={5} />);
+    await openDetails('Monitor');
+
+    expect(await screen.findByRole('button', { name: 'Redeem for 599 pts' })).toBeDisabled();
+  });
+
+  it('lists past orders with the date each was placed', async () => {
+    stubCheckoutApi({ orders: [placed, { ...placed, orderId: 6, productTitle: 'Backpack', pointCost: 110, createdAt: '2026-10-20T15:00:00.000Z' }] });
+    render(<CatalogPage sponsors={[sponsors[0]]} userId={5} />);
+
+    const rows = within(await screen.findByRole('table')).getAllByRole('row').slice(1);
+    expect(rows.map((row) => [...row.querySelectorAll('td')].map((cell) => cell.textContent))).toEqual([
+      ['Nov 4, 2026', 'Hard Drive', 'Acme Trucking', '50 pts'],
+      ['Oct 20, 2026', 'Backpack', 'Acme Trucking', '110 pts'],
+    ]);
+    expect(screen.queryByText('No orders yet')).not.toBeInTheDocument();
+  });
+});

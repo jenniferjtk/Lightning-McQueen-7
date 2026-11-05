@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 const favoriteStorageKey = (userId) => `driver-catalog-favorites-${userId ?? 'guest'}`;
 
@@ -11,8 +11,14 @@ function readFavorites(userId) {
 }
 
 const formatPrice = (price) => Number(price).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+const formatPoints = (points) => `${Number(points).toLocaleString()} pts`;
+const formatOrderDate = (value) => new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+const hasRequiredAddress = (address) => Boolean(address
+  && address.streetAddress?.trim() && address.city?.trim() && address.zipCode?.trim() && address.country?.trim());
+const addressLine = (address) => [address.streetAddress, address.city, address.state, address.zipCode, address.country]
+  .map((part) => part?.trim()).filter(Boolean).join(', ');
 
-export default function CatalogPage({ sponsors = [], userId }) {
+export default function CatalogPage({ sponsors = [], userId, onOrderPlaced }) {
   const [activeSponsorId, setActiveSponsorId] = useState(sponsors[0]?.id ?? null);
   const [products, setProducts] = useState([]);
   const [catalogData, setCatalogData] = useState(null);
@@ -30,6 +36,15 @@ export default function CatalogPage({ sponsors = [], userId }) {
   const [addressSaving, setAddressSaving] = useState(false);
   const [addressError, setAddressError] = useState('');
   const [addressMessage, setAddressMessage] = useState('');
+  const [savedAddress, setSavedAddress] = useState(null);
+  const [orders, setOrders] = useState([]);
+  const [ordersLoading, setOrdersLoading] = useState(Boolean(userId));
+  const [ordersError, setOrdersError] = useState('');
+  const [confirmingProductId, setConfirmingProductId] = useState(null);
+  const [placingOrder, setPlacingOrder] = useState(false);
+  const [checkoutError, setCheckoutError] = useState('');
+  const [placedOrder, setPlacedOrder] = useState(null);
+  const placedHeadingRef = useRef(null);
 
   useEffect(() => {
     if (!sponsors.some((sponsor) => Number(sponsor.id) === Number(activeSponsorId))) {
@@ -51,10 +66,27 @@ export default function CatalogPage({ sponsors = [], userId }) {
         return data.address;
       })
       .then((address) => {
-        if (active && address) setShippingAddress((current) => ({ ...current, ...address }));
+        if (!active || !address) return;
+        setShippingAddress((current) => ({ ...current, ...address }));
+        setSavedAddress(address);
       })
       .catch((requestError) => { if (active) setAddressError(requestError.message); })
       .finally(() => { if (active) setAddressLoading(false); });
+    return () => { active = false; };
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return undefined;
+    let active = true;
+    fetch('/api/orders', { credentials: 'include' })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data?.message || 'Unable to load your orders.');
+        return data;
+      })
+      .then((data) => { if (active) setOrders(Array.isArray(data?.orders) ? data.orders : []); })
+      .catch((requestError) => { if (active) setOrdersError(requestError.message); })
+      .finally(() => { if (active) setOrdersLoading(false); });
     return () => { active = false; };
   }, [userId]);
 
@@ -116,7 +148,57 @@ export default function CatalogPage({ sponsors = [], userId }) {
 
   useEffect(() => {
     setSelectedProductId(null);
+    setPlacedOrder(null);
   }, [activeSponsorId]);
+
+  // The confirmation replaces a taller detail view, so move the driver to it.
+  useEffect(() => {
+    if (placedOrder) placedHeadingRef.current?.focus();
+  }, [placedOrder]);
+
+  useEffect(() => {
+    setConfirmingProductId(null);
+    setCheckoutError('');
+  }, [selectedProductId, activeSponsorId]);
+
+  const updateProduct = (productId, changes) => {
+    setProducts((current) => current.map((product) => (
+      product.productId === productId ? { ...product, ...changes } : product
+    )));
+  };
+
+  // The server re-checks price, stock and balance; whatever it reports back is
+  // applied here so the page matches what the driver would actually be charged.
+  const placeOrder = async (product) => {
+    setPlacingOrder(true);
+    setCheckoutError('');
+    try {
+      const response = await fetch('/api/orders', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sponsorId: activeSponsorId, productId: product.productId, expectedPointCost: product.pointCost }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (data.code === 'PRICE_CHANGED') updateProduct(product.productId, { pointCost: data.pointCost, price: data.price });
+        if (data.code === 'OUT_OF_STOCK') updateProduct(product.productId, { stockQuantity: 0 });
+        if (data.code === 'INSUFFICIENT_POINTS') setCatalogData((current) => ({ ...current, pointBalance: data.pointBalance }));
+        throw new Error(data.message || 'Unable to place this order.');
+      }
+      setCatalogData((current) => ({ ...current, pointBalance: data.pointBalance }));
+      if (data.stockQuantity !== undefined) updateProduct(product.productId, { stockQuantity: data.stockQuantity });
+      setOrders((current) => [data.order, ...current]);
+      setPlacedOrder({ ...data.order, pointBalance: data.pointBalance, shipsTo: addressLine(savedAddress) });
+      setConfirmingProductId(null);
+      setSelectedProductId(null);
+      onOrderPlaced?.(data.order);
+    } catch (requestError) {
+      setCheckoutError(requestError.message);
+    } finally {
+      setPlacingOrder(false);
+    }
+  };
 
   const toggleFavorite = (productId) => {
     setFavorites((current) => {
@@ -147,6 +229,7 @@ export default function CatalogPage({ sponsors = [], userId }) {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.message || 'Unable to save your shipping address.');
       setShippingAddress(data.address);
+      setSavedAddress(data.address);
       setAddressMessage('Delivery address saved securely.');
     } catch (requestError) {
       setAddressError(requestError.message);
@@ -276,6 +359,19 @@ export default function CatalogPage({ sponsors = [], userId }) {
                 setAffordableOnly(false);
               }}>Clear filters</button>
             </div>
+          ) : placedOrder ? (
+            <section className="catalog-order-placed" aria-labelledby="order-placed-title">
+              <p className="catalog-section__eyebrow">Order #{placedOrder.orderId}</p>
+              <h3 id="order-placed-title" ref={placedHeadingRef} tabIndex={-1}>Order placed</h3>
+              <p role="status">Your order for {placedOrder.productTitle} is confirmed.</p>
+              <dl className="catalog-summary">
+                <div><dt>Points spent</dt><dd>{formatPoints(placedOrder.pointCost)}</dd></div>
+                <div><dt>New balance</dt><dd>{formatPoints(placedOrder.pointBalance)}</dd></div>
+                <div><dt>Ordered on</dt><dd>{formatOrderDate(placedOrder.createdAt)}</dd></div>
+                {placedOrder.shipsTo && <div><dt>Ships to</dt><dd>{placedOrder.shipsTo}</dd></div>}
+              </dl>
+              <button type="button" onClick={() => setPlacedOrder(null)}>Back to catalog</button>
+            </section>
           ) : (
             selectedProduct ? (
               <article className="catalog-detail" aria-label={selectedProduct.title}>
@@ -303,6 +399,55 @@ export default function CatalogPage({ sponsors = [], userId }) {
                     </p>
                     {selectedProduct.stockQuantity === 0 && <p className="catalog-stock-warning" role="alert">This item is currently unavailable.</p>}
                     <p className="catalog-detail__description">{selectedProduct.description}</p>
+                    {balance !== null && confirmingProductId !== selectedProduct.productId && (
+                      <button
+                        className="catalog-detail__redeem"
+                        type="button"
+                        disabled={selectedProduct.stockQuantity === 0}
+                        onClick={() => { setCheckoutError(''); setConfirmingProductId(selectedProduct.productId); }}
+                      >
+                        Redeem for {formatPoints(selectedProduct.pointCost)}
+                      </button>
+                    )}
+                    {balance !== null && confirmingProductId === selectedProduct.productId && (() => {
+                      const cost = Number(selectedProduct.pointCost);
+                      const shortBy = cost - balance;
+                      const outOfStock = selectedProduct.stockQuantity === 0;
+                      const addressReady = hasRequiredAddress(savedAddress);
+                      return (
+                        <div className="catalog-checkout" role="dialog" aria-labelledby="catalog-checkout-title">
+                          <h4 id="catalog-checkout-title">Confirm your order</h4>
+                          <dl className="catalog-summary">
+                            <div><dt>Item</dt><dd>{selectedProduct.title}</dd></div>
+                            <div><dt>Cost</dt><dd>{formatPoints(cost)}</dd></div>
+                            <div><dt>Current balance</dt><dd>{formatPoints(balance)}</dd></div>
+                            <div><dt>Balance after order</dt><dd>{shortBy > 0 ? '—' : formatPoints(balance - cost)}</dd></div>
+                            <div><dt>Ships to</dt><dd>{addressReady ? addressLine(savedAddress) : 'No address saved'}</dd></div>
+                          </dl>
+                          {shortBy > 0 && (
+                            <p className="catalog-checkout__error" role="alert">
+                              Not enough points. You need {shortBy.toLocaleString()} more points to order this item.
+                            </p>
+                          )}
+                          {!addressReady && (
+                            <p className="catalog-checkout__error" role="alert">Save a shipping address below before placing an order.</p>
+                          )}
+                          {checkoutError && <p className="catalog-checkout__error" role="alert">{checkoutError}</p>}
+                          <div className="catalog-checkout__actions">
+                            <button
+                              type="button"
+                              disabled={placingOrder || shortBy > 0 || outOfStock || !addressReady}
+                              onClick={() => placeOrder(selectedProduct)}
+                            >
+                              {placingOrder ? 'Placing order...' : 'Place order'}
+                            </button>
+                            <button type="button" className="catalog-checkout__cancel" disabled={placingOrder} onClick={() => { setConfirmingProductId(null); setCheckoutError(''); }}>
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               </article>
@@ -401,10 +546,38 @@ export default function CatalogPage({ sponsors = [], userId }) {
             <h2 id="order-history-title">Order history</h2>
           </div>
         </div>
-        <div className="catalog-orders__empty">
-          <h3>No orders yet</h3>
-          <p>Items you redeem from a sponsor catalog will be listed here.</p>
-        </div>
+        {ordersLoading ? (
+          <p className="catalog-state">Loading your orders...</p>
+        ) : ordersError ? (
+          <p className="catalog-state" role="alert">{ordersError}</p>
+        ) : orders.length === 0 ? (
+          <div className="catalog-orders__empty">
+            <h3>No orders yet</h3>
+            <p>Items you redeem from a sponsor catalog will be listed here.</p>
+          </div>
+        ) : (
+          <table className="catalog-orders__table">
+            <caption className="visually-hidden">Your orders, newest first</caption>
+            <thead>
+              <tr>
+                <th scope="col">Order date</th>
+                <th scope="col">Item</th>
+                <th scope="col">Sponsor</th>
+                <th scope="col">Points</th>
+              </tr>
+            </thead>
+            <tbody>
+              {orders.map((order) => (
+                <tr key={order.orderId}>
+                  <td><time dateTime={order.createdAt}>{formatOrderDate(order.createdAt)}</time></td>
+                  <td>{order.productTitle}</td>
+                  <td>{order.sponsorName}</td>
+                  <td>{formatPoints(order.pointCost)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </section>
     </main>
   );
