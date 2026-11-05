@@ -56,7 +56,16 @@ jobs:
           aws-region: us-east-2
       - name: Build and deploy
         if: env.HAS_DEPLOY_SECRETS == 'true'
-        run: npm run build && npx --yes serverless@4.46.0 deploy
+        # The runner sometimes can't reach the Serverless API on the first
+        # try (connect timeout), so retry the deploy with a growing pause.
+        run: |
+          npm run build
+          for attempt in 1 2 3; do
+            npx --yes serverless@4.46.0 deploy && exit 0
+            echo "::warning::Deploy attempt $attempt failed."
+            [ "$attempt" -lt 3 ] && sleep $((attempt * 30))
+          done
+          exit 1
         env:
           SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
           DB_HOST: ${{ secrets.DB_HOST }}
