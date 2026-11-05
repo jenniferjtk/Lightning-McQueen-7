@@ -13,6 +13,7 @@ const ADMIN_LINKS = [
   { label: 'Admin Home', value: 'admin' },
   { label: 'Users', value: 'drivers' },
   { label: 'Point Management', value: 'points' },
+  { label: 'Reports', value: 'reports' },
   { label: 'Sponsors', value: 'sponsors' },
   { label: 'About Page', value: 'about' },
 ];
@@ -23,6 +24,7 @@ const SPONSOR_LINKS = [
   { label: 'Applications', value: 'sponsor-applications', showsPendingCount: true },
   { label: 'Catalog', value: 'sponsor-catalog' },
   { label: 'Point Management', value: 'points' },
+  { label: 'Reports', value: 'reports' },
   { label: 'About Page', value: 'about' },
 ];
 

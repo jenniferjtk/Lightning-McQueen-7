@@ -33,7 +33,7 @@ describe('admin driver management', () => {
     const res = await agent.get('/api/admin/drivers').expect(200);
 
     expect(res.body.drivers).toEqual([
-      { id: 1, email: 'driver@test.com', firstName: 'Dana', lastName: 'Driver', createdAt: '2026-09-01', affiliation: 'Acme Trucking' },
+      { id: 1, email: 'driver@test.com', firstName: 'Dana', lastName: 'Driver', createdAt: '2026-09-01', sponsorId: null, affiliation: 'Acme Trucking' },
     ]);
   });
 

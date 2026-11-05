@@ -44,6 +44,18 @@ it('routes sponsors to the catalog page', async () => {
   expect(await screen.findByRole('heading', { level: 1, name: 'Product catalog.' })).toBeInTheDocument();
 });
 
+it('shows the reports page and navigation link for admins', async () => {
+  renderAs('admin', '/reports');
+  expect(await screen.findByRole('heading', { name: 'Sponsor Report' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Reports' })).toBeInTheDocument();
+});
+
+it('shows the reports page and navigation link for sponsors', async () => {
+  renderAs('sponsor', '/reports');
+  expect(await screen.findByRole('heading', { name: 'Sponsor Report' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Reports' })).toBeInTheDocument();
+});
+
 it('keeps drivers out of sponsor-only pages', async () => {
   renderAs('driver', '/sponsor/catalog');
   expect(await screen.findByText('Recent point updates')).toBeInTheDocument();

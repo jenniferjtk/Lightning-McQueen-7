@@ -10,8 +10,11 @@ it('edits, resets passwords, and deletes sponsors through the sponsor routes', a
   const sponsor = { id: 2, firstName: 'Sam', lastName: 'Sponsor', email: 'sam@example.com' };
   vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url, options) => ({
     ok: true,
-    json: async () => options?.method === 'PUT' ? { sponsor: { ...sponsor, firstName: 'Updated' } }
-      : url.endsWith('/drivers') ? { drivers: [] } : { sponsors: [sponsor] },
+    json: async () => url.endsWith('/sponsor-links/2') ? { message: 'Sponsor account link saved.' }
+      : options?.method === 'PUT' ? { sponsor: { ...sponsor, firstName: 'Updated' } }
+      : url.endsWith('/drivers') ? { drivers: [] }
+        : url.endsWith('/sponsor-links') ? { sponsors: [], sponsorUsers: [{ user_id: 2, sponsor_id: null }] }
+          : { sponsors: [sponsor] },
   })));
   vi.spyOn(window, 'confirm').mockReturnValue(true);
   render(<AdminDriversPage />);
@@ -39,10 +42,14 @@ it('edits, resets passwords, and deletes sponsors through the sponsor routes', a
 
 it.each(['Driver', 'Sponsor', 'Admin'])('creates a %s using the shared fields', async (label) => {
   const role = label.toLowerCase();
-  vi.stubGlobal('fetch', vi.fn()
-    .mockResolvedValueOnce({ ok: true, json: async () => ({ drivers: [] }) })
-    .mockResolvedValueOnce({ ok: true, json: async () => ({ sponsors: [] }) })
-    .mockResolvedValueOnce({ ok: true, json: async () => ({ user: { id: 5, firstName: 'New', lastName: 'User', email: 'new@example.com', role } }) }));
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url, options) => ({
+    ok: true,
+    json: async () => options?.method === 'POST'
+      ? { user: { id: 5, firstName: 'New', lastName: 'User', email: 'new@example.com', role } }
+      : url.endsWith('/drivers') ? { drivers: [] }
+        : url.endsWith('/sponsor-links') ? { sponsors: [], sponsorUsers: [] }
+          : { sponsors: [] },
+  })));
   render(<AdminDriversPage />);
   await screen.findByText('No driver accounts match your search.');
   for (const [name, value] of [['First name', 'New'], ['Last name', 'User'], ['Email address', 'new@example.com'], ['Temporary password', 'test-password']]) {
@@ -65,13 +72,15 @@ it('shows driver and sponsor affiliations on the same page', async () => {
   vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url) => ({
     ok: true,
     json: async () => url.endsWith('/drivers')
-      ? { drivers: [{ id: 1, firstName: 'Dana', lastName: 'Driver', email: 'driver@example.com', affiliation: 'Acme Trucking, Roadrunner Logistics' }] }
-      : { sponsors: [{ id: 2, firstName: 'Sam', lastName: 'Sponsor', email: 'sponsor@example.com', createdAt: '2026-10-05', affiliation: 'Acme Trucking' }] },
+      ? { drivers: [{ id: 1, firstName: 'Dana', lastName: 'Driver', email: 'driver@example.com', affiliation: 'Acme Trucking, Roadrunner Logistics', sponsorId: 11 }] }
+      : url.endsWith('/sponsor-links')
+        ? { sponsors: [{ sponsor_id: 10, name: 'Acme Trucking' }, { sponsor_id: 11, name: 'Roadrunner Logistics' }], sponsorUsers: [{ user_id: 2, sponsor_id: 10 }] }
+        : { sponsors: [{ id: 2, firstName: 'Sam', lastName: 'Sponsor', email: 'sponsor@example.com', createdAt: '2026-10-05', affiliation: 'Acme Trucking' }] },
   })));
   render(<AdminDriversPage />);
-  expect(await screen.findByRole('cell', { name: 'Acme Trucking, Roadrunner Logistics' })).toBeInTheDocument();
+  expect(await screen.findByLabelText('Sponsor affiliation for Dana Driver')).toHaveValue('11');
   expect(await screen.findByRole('cell', { name: 'Sam Sponsor' })).toBeInTheDocument();
-  expect(screen.getByRole('cell', { name: 'Acme Trucking' })).toBeInTheDocument();
+  expect(within(screen.getByRole('region', { name: 'Sponsors' })).getByLabelText('Organization for Sam Sponsor')).toHaveValue('10');
   expect(within(screen.getByRole('region', { name: 'Drivers' })).getByText('1', { selector: '.admin-account-count' })).toBeInTheDocument();
   expect(within(screen.getByRole('region', { name: 'Sponsors' })).getByText('1', { selector: '.admin-account-count' })).toBeInTheDocument();
 });
