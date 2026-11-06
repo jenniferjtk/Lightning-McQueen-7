@@ -74,10 +74,13 @@ them on save. GitHub Actions runs the suite and the build on every push to
 Run the files in `backend/db/migrations/` against the database, in order:
 `002_driver_applications.sql`, `003_sponsor_id_on_users.sql`,
 `pt_management.sql`, `004_sessions_table.sql`, and
-`005_point_change_reports.sql`, and `006_shipping_address_and_catalog_stock.sql`.
+`005_point_change_reports.sql`, `006_shipping_address_and_catalog_stock.sql`,
+and `007_orders.sql`.
 The sessions table is required on AWS, where
 logins are stored in MySQL instead of memory. The point-change reports table
-stores driver and sponsor reports for administrator review.
+stores driver and sponsor reports for administrator review. The orders table
+holds catalog redemptions; a driver's balance with a sponsor is the points
+that sponsor awarded minus their orders with it that aren't canceled.
 
 `backend/db/seeds/sponsor_review_test_data.sql` adds a test sponsor and a test
 driver; see the comments at the top of that file for the logins.
@@ -86,7 +89,22 @@ driver a few weeks of demo point history for the dashboard charts.
 
 ## Deploy to AWS
 
-From the repo root, with the `.env` above:
+Every push to `main` deploys automatically once the tests pass (the `deploy`
+job in `.github/workflows/test.yml`). It can also be rerun by hand from the
+Actions tab ("Tests" → "Run workflow"). It needs these repository secrets in
+Settings → Secrets and variables → Actions; without them the deploy step is
+skipped:
+
+- `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`: an IAM user allowed to deploy
+  the stack in the CPSC 4910 account
+- `SERVERLESS_ACCESS_KEY`: from the `jennagracejohnson3` Serverless dashboard
+- `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `SESSION_SECRET` (and
+  optionally `DB_PORT`): the same values as `.env`
+
+Migrations are not run by the workflow. Apply new files in
+`backend/db/migrations/` to the database before merging code that needs them.
+
+To deploy by hand instead, from the repo root, with the `.env` above:
 
 ```bash
 set -a && source .env && set +a && npm run deploy

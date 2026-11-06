@@ -4,6 +4,7 @@
 #   npm run deploy
 # DB_* and SESSION_SECRET must be in the shell environment (see backend/.env).
 org: jennagracejohnson3
+frameworkVersion: '~4.46.0'
 app: lightning-mcqueen
 service: lightning-mcqueen-app
 

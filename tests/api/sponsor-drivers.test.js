@@ -205,3 +205,34 @@ describe('sponsor weekly point changes', () => {
     expect(db.execute).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('sponsor point transaction backlog', () => {
+  it('returns all point-rule transactions belonging to the signed-in sponsor', async () => {
+    const agent = await signIn(app, users.sponsor);
+    db.execute.mockClear();
+    mockQueries([
+      roleLookup,
+      ['FROM point_audit_log l', [{
+        id: 12, driverName: 'Dana Driver', label: 'Late delivery', amount: '-15', date: 'Oct 27, 2026',
+      }]],
+    ]);
+
+    const response = await agent.get('/api/sponsor/points/transactions').expect(200);
+
+    expect(response.body).toEqual({ entries: [{
+      id: 12, driverName: 'Dana Driver', label: 'Late delivery', amount: -15, date: 'Oct 27, 2026',
+    }] });
+    const [query, params] = db.execute.mock.calls[1];
+    expect(params).toEqual([users.sponsor.sponsor_id]);
+    expect(query).toContain('r.sponsor_id = ?');
+    expect(query).toContain('ORDER BY l.timestamp DESC, l.log_id DESC');
+  });
+
+  it('rejects non-sponsor accounts', async () => {
+    const agent = await signIn(app, users.driver);
+    db.execute.mockClear();
+    mockQueries([roleLookup]);
+
+    await agent.get('/api/sponsor/points/transactions').expect(403);
+  });
+});

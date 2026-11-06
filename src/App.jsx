@@ -20,6 +20,7 @@ import {
 } from './components/PointCharts.jsx';
 import SponsorCatalogPage from './components/SponsorCatalogPage.jsx';
 import CatalogPage from './components/CatalogPage.jsx';
+import SponsorPointsBacklog from './components/SponsorPointsBacklog.jsx';
 
 const emptyDriver = {
   name: '',
@@ -184,14 +185,26 @@ export default function App() {
       ) : visiblePage === 'sponsors' ? (
         <SponsorsPage user={previewUser} readOnly={isPreview} />
       ) : visiblePage === 'catalog' ? (
-        <CatalogPage sponsors={driver.sponsors} userId={user.id} />
+        <CatalogPage
+          sponsors={driver.sponsors}
+          userId={user.id}
+          onOrderPlaced={(order) => setDriverData((current) => (current ? { ...current, points: Number(current.points) - order.pointCost } : current))}
+        />
       ) : visiblePage === 'application' ? (
         <MyApplicationPage user={previewUser} preview={isPreview} />
       ) : (
         <main className="dashboard">
+          {user.role === 'driver' && Number(driver.points) < 0 && (
+            <section className="negative-points-notice" role="alert">
+              Your point value has dropped below 0 and you are at risk of being dropped by your sponsor
+            </section>
+          )}
           <div className={isSponsor ? 'dashboard__top dashboard__top--sponsor' : 'dashboard__top'}>
             {isSponsor ? (
-              <SponsorWeeklyPointsChart />
+              <>
+                <SponsorWeeklyPointsChart />
+                <SponsorPointsBacklog />
+              </>
             ) : (
               <>
                 <div className="dashboard__points-column">
