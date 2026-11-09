@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 
-const createRow = (id) => ({
+const createRow = (id, sponsorId = '') => ({
   localId: id,
   rule_id: null,
-  sponsor_id: '',
+  sponsor_id: sponsorId,
   pt_value: '1',
   description: '',
   frequency: 'one-time',
@@ -19,6 +19,7 @@ export default function PointManagementPage({ user, sponsors = [], readOnly = fa
   const [nextLocalId, setNextLocalId] = useState(1);
   const [activeSponsorId, setActiveSponsorId] = useState(sponsors[0]?.id ?? null);
   const canManage = !readOnly && (user?.role === 'admin' || user?.role === 'sponsor');
+  const isSponsor = user?.role === 'sponsor';
   const isDriver = user?.role === 'driver';
 
   useEffect(() => {
@@ -47,10 +48,12 @@ export default function PointManagementPage({ user, sponsors = [], readOnly = fa
 
   const visibleRows = isDriver
     ? rows.filter((row) => Number(row.sponsor_id) === Number(activeSponsorId))
+    : isSponsor
+      ? rows.filter((row) => Number(row.sponsor_id) === Number(user?.sponsorId))
     : rows;
 
   const addRow = () => {
-    setRows((currentRows) => [...currentRows, createRow(nextLocalId)]);
+    setRows((currentRows) => [...currentRows, createRow(nextLocalId, isSponsor ? user?.sponsorId : '')]);
     setNextLocalId((currentId) => currentId + 1);
     setMessage('');
   };
@@ -174,7 +177,7 @@ export default function PointManagementPage({ user, sponsors = [], readOnly = fa
                   min="1"
                   step="1"
                   value={row.sponsor_id}
-                  disabled={!canManage || !row.isEditing}
+                  disabled={!canManage || !row.isEditing || isSponsor}
                   onChange={(event) => updateRow(row.rule_id ?? row.localId, 'sponsor_id', event.target.value)}
                 />
               </label>

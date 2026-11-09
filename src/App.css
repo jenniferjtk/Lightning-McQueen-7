@@ -687,6 +687,9 @@ body {
 .catalog-empty p, .catalog-orders__empty p { color: var(--color-slate); margin: 0.45rem 0 0; }
 .catalog-orders { margin-top: 0.5rem; }
 .catalog-orders__empty { border-top: 1px solid #e0e5e8; padding: 1.25rem 0; }
+.catalog-order-cancel { background: transparent; border: 1px solid #a2382b; border-radius: 4px; color: #8f2f23; cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 700; padding: 0.45rem 0.65rem; }
+.catalog-order-cancel:hover:not(:disabled), .catalog-order-cancel:focus-visible { background: #f6e3df; }
+.catalog-order-cancel:disabled { cursor: wait; opacity: 0.6; }
 .catalog-orders__table { border-collapse: collapse; width: 100%; }
 .catalog-orders__table th, .catalog-orders__table td { border-top: 1px solid #e0e5e8; padding: 0.7rem 0.5rem; text-align: left; vertical-align: top; }
 .catalog-orders__table th { color: var(--color-slate); font-size: 0.78rem; text-transform: uppercase; }

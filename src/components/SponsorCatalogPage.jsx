@@ -161,8 +161,8 @@ export default function SponsorCatalogPage({ user }) {
                     <tr>
                       <th scope="col">Product</th>
                       <th scope="col">Price</th>
-                      <th scope="col">Category tag</th>
                       <th scope="col">Stock quantity</th>
+                      <th scope="col">Category tag</th>
                       <th scope="col"><span className="visually-hidden">Actions</span></th>
                     </tr>
                   </thead>

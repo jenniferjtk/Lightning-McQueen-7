@@ -229,3 +229,70 @@ describe('GET /api/orders', () => {
     await agent.get('/api/orders').expect(403);
   });
 });
+
+describe('POST /api/orders/:orderId/cancel', () => {
+  const pendingOrder = {
+    order_id: 42, driver_user_id: users.driver.user_id, sponsor_id: SPONSOR_ID, product_id: 9,
+    product_title: 'Hard Drive', unit_price: '64.00', point_cost: 6400, status: 'pending',
+    created_at: '2026-11-04T15:30:00.000Z', sponsor_name: 'Acme Trucking',
+  };
+
+  it('cancels its own pending order once, restores stock, and returns points', async () => {
+    const agent = await signIn(app, users.driver);
+    mockQueries([
+      roleLookup,
+      ['FROM orders o JOIN sponsors s', [pendingOrder]],
+      ["UPDATE orders SET status = 'canceled'", { affectedRows: 1 }],
+      ['UPDATE sponsor_catalog SET stock_quantity = stock_quantity + 1', { affectedRows: 1 }],
+      ['SELECT stock_quantity FROM sponsor_catalog', [{ stock_quantity: 4 }]],
+      ['AS points', [{ points: 600 }]],
+    ]);
+
+    const response = await agent.post('/api/orders/42/cancel').expect(200);
+
+    expect(response.body).toEqual({
+      order: {
+        orderId: 42, sponsorId: SPONSOR_ID, sponsorName: 'Acme Trucking', productId: 9,
+        productTitle: 'Hard Drive', unitPrice: 64, pointCost: 6400, status: 'canceled',
+        createdAt: pendingOrder.created_at,
+      },
+      pointBalance: 600,
+      stockQuantity: 4,
+    });
+    expect(db.commit).toHaveBeenCalledOnce();
+    expect(db.rollback).not.toHaveBeenCalled();
+    expect(calls("UPDATE orders SET status = 'canceled'")).toHaveLength(1);
+    expect(calls('UPDATE sponsor_catalog SET stock_quantity = stock_quantity + 1')).toHaveLength(1);
+    expect(db.release).toHaveBeenCalledOnce();
+  });
+
+  it('does not refund or restore stock for a non-pending order', async () => {
+    const agent = await signIn(app, users.driver);
+    mockQueries([roleLookup, ['FROM orders o JOIN sponsors s', [{ ...pendingOrder, status: 'shipped' }]]]);
+
+    const response = await agent.post('/api/orders/42/cancel').expect(409);
+
+    expect(response.body.code).toBe('ORDER_NOT_CANCELLABLE');
+    expect(calls("UPDATE orders SET status = 'canceled'")).toHaveLength(0);
+    expect(calls('UPDATE sponsor_catalog SET stock_quantity = stock_quantity + 1')).toHaveLength(0);
+    expect(db.rollback).toHaveBeenCalledOnce();
+    expect(db.commit).not.toHaveBeenCalled();
+  });
+
+  it('does not let a driver cancel someone else\'s order', async () => {
+    const agent = await signIn(app, users.driver);
+    mockQueries([roleLookup, ['FROM orders o JOIN sponsors s', []]]);
+
+    await agent.post('/api/orders/42/cancel').expect(404, { message: 'Order not found.' });
+    expect(calls("UPDATE orders SET status = 'canceled'")).toHaveLength(0);
+  });
+
+  it('requires authentication and is driver-only', async () => {
+    await request(app).post('/api/orders/42/cancel').expect(401);
+    for (const user of [users.sponsor, users.admin]) {
+      const agent = await signIn(app, user);
+      mockQueries([roleLookup]);
+      await agent.post('/api/orders/42/cancel').expect(403);
+    }
+  });
+});
