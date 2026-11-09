@@ -18,7 +18,7 @@ const hasRequiredAddress = (address) => Boolean(address
 const addressLine = (address) => [address.streetAddress, address.city, address.state, address.zipCode, address.country]
   .map((part) => part?.trim()).filter(Boolean).join(', ');
 
-export default function CatalogPage({ sponsors = [], userId, onOrderPlaced }) {
+export default function CatalogPage({ sponsors = [], userId, onOrderPlaced, onOrderCanceled }) {
   const [activeSponsorId, setActiveSponsorId] = useState(sponsors[0]?.id ?? null);
   const [products, setProducts] = useState([]);
   const [catalogData, setCatalogData] = useState(null);
@@ -40,6 +40,8 @@ export default function CatalogPage({ sponsors = [], userId, onOrderPlaced }) {
   const [orders, setOrders] = useState([]);
   const [ordersLoading, setOrdersLoading] = useState(Boolean(userId));
   const [ordersError, setOrdersError] = useState('');
+  const [orderActionError, setOrderActionError] = useState('');
+  const [cancellingOrderId, setCancellingOrderId] = useState(null);
   const [confirmingProductId, setConfirmingProductId] = useState(null);
   const [placingOrder, setPlacingOrder] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
@@ -235,6 +237,32 @@ export default function CatalogPage({ sponsors = [], userId, onOrderPlaced }) {
       setAddressError(requestError.message);
     } finally {
       setAddressSaving(false);
+    }
+  };
+
+  const cancelOrder = async (order) => {
+    if (!window.confirm(`Cancel order #${order.orderId} for ${order.productTitle}? The points will be returned to your balance.`)) return;
+    setCancellingOrderId(order.orderId);
+    setOrderActionError('');
+    try {
+      const response = await fetch(`/api/orders/${order.orderId}/cancel`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || 'Unable to cancel this order.');
+      setOrders((current) => current.map((entry) => entry.orderId === order.orderId ? data.order : entry));
+      if (Number(order.sponsorId) === Number(activeSponsorId)) {
+        setCatalogData((current) => ({ ...current, pointBalance: data.pointBalance }));
+        if (data.stockQuantity !== null && data.stockQuantity !== undefined) {
+          updateProduct(order.productId, { stockQuantity: data.stockQuantity });
+        }
+      }
+      onOrderCanceled?.(data.order);
+    } catch (requestError) {
+      setOrderActionError(requestError.message);
+    } finally {
+      setCancellingOrderId(null);
     }
   };
 
@@ -556,27 +584,45 @@ export default function CatalogPage({ sponsors = [], userId, onOrderPlaced }) {
             <p>Items you redeem from a sponsor catalog will be listed here.</p>
           </div>
         ) : (
-          <table className="catalog-orders__table">
-            <caption className="visually-hidden">Your orders, newest first</caption>
-            <thead>
-              <tr>
-                <th scope="col">Order date</th>
-                <th scope="col">Item</th>
-                <th scope="col">Sponsor</th>
-                <th scope="col">Points</th>
-              </tr>
-            </thead>
-            <tbody>
-              {orders.map((order) => (
-                <tr key={order.orderId}>
-                  <td><time dateTime={order.createdAt}>{formatOrderDate(order.createdAt)}</time></td>
-                  <td>{order.productTitle}</td>
-                  <td>{order.sponsorName}</td>
-                  <td>{formatPoints(order.pointCost)}</td>
+          <>
+            {orderActionError && <p className="catalog-address-form__error" role="alert">{orderActionError}</p>}
+            <table className="catalog-orders__table">
+              <caption className="visually-hidden">Your orders, newest first</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Order date</th>
+                  <th scope="col">Item</th>
+                  <th scope="col">Sponsor</th>
+                  <th scope="col">Points</th>
+                  <th scope="col">Status</th>
+                  <th scope="col"><span className="visually-hidden">Actions</span></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {orders.map((order) => (
+                  <tr key={order.orderId}>
+                    <td><time dateTime={order.createdAt}>{formatOrderDate(order.createdAt)}</time></td>
+                    <td>{order.productTitle}</td>
+                    <td>{order.sponsorName}</td>
+                    <td>{formatPoints(order.pointCost)}</td>
+                    <td>{order.status}</td>
+                    <td>
+                      {order.status === 'pending' && (
+                        <button
+                          className="catalog-order-cancel"
+                          type="button"
+                          disabled={cancellingOrderId !== null}
+                          onClick={() => cancelOrder(order)}
+                        >
+                          {cancellingOrderId === order.orderId ? 'Canceling...' : `Cancel order ${order.orderId}`}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
         )}
       </section>
     </main>

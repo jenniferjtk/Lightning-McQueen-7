@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import App from '../../src/App.jsx';
 
 // Renders the whole app for a signed-in user at a given path. Page tests
@@ -11,12 +11,13 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); window
 
 const json = (body) => ({ ok: true, status: 200, json: async () => body });
 
-function renderAs(role, path, driver = {}) {
+function renderAs(role, path, driver = {}, orders = []) {
   window.history.pushState({}, '', path);
   const user = { id: 1, email: 'user@test.com', role, firstName: 'Test', lastName: 'User', sponsorId: role === 'sponsor' ? 1 : null };
   vi.stubGlobal('fetch', vi.fn(async (url) => {
     if (url.includes('/api/auth/me')) return json({ user });
     if (url === '/api/driver') return json({ id: 1, name: 'Test User', sponsorName: '', points: 0, balanceNotifications: [], recentPurchases: [], ...driver });
+    if (url === '/api/orders') return json({ orders });
     if (url === '/api/sponsor/points/transactions') return json({ entries: [] });
     if (url.includes('/api/sponsor/drivers')) return json({ sponsorLinked: true, drivers: [] });
     if (url.includes('/api/sponsor-rules')) return json({ rules: [] });
@@ -33,6 +34,17 @@ it('renders the driver dashboard with point charts without crashing', async () =
   const errors = renderAs('driver', '/');
   expect(await screen.findByText('Recent point updates')).toBeInTheDocument();
   expect(errors.filter((error) => /ReferenceError|is not defined/.test(error))).toEqual([]);
+});
+
+it('shows non-canceled catalog orders in the dashboard purchase section', async () => {
+  renderAs('driver', '/', {}, [
+    { orderId: 7, productTitle: 'Hard Drive', pointCost: 50, createdAt: '2026-11-04T15:30:00Z', status: 'pending' },
+    { orderId: 6, productTitle: 'Canceled Monitor', pointCost: 599, createdAt: '2026-11-03T15:30:00Z', status: 'canceled' },
+  ]);
+
+  const table = await screen.findByRole('table');
+  expect(within(table).getByText('Hard Drive')).toBeInTheDocument();
+  expect(within(table).queryByText('Canceled Monitor')).not.toBeInTheDocument();
 });
 
 it('warns drivers whose point balance is below zero', async () => {

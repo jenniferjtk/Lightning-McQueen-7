@@ -104,10 +104,30 @@ export default function App() {
       setDriverData(null);
       return;
     }
+    let active = true;
     fetch('/api/driver', { credentials: 'include' })
-      .then((response) => response.ok ? response.json() : null)
-      .then(setDriverData)
-      .catch(() => setDriverData(null));
+      .then(async (response) => (response.ok ? response.json() : null))
+      .then(async (data) => {
+        if (!data) return null;
+        let purchases = [];
+        try {
+          const response = await fetch('/api/orders', { credentials: 'include' });
+          const payload = response.ok ? await response.json() : {};
+          purchases = (Array.isArray(payload.orders) ? payload.orders : [])
+            .filter((order) => order.status !== 'canceled')
+            .map((order) => ({
+              id: order.orderId,
+              item: order.productTitle,
+              date: order.createdAt,
+              points: Number(order.pointCost),
+            }));
+        } catch {
+          purchases = [];
+        }
+        if (active) setDriverData({ ...data, recentPurchases: purchases });
+      })
+      .catch(() => { if (active) setDriverData(null); })
+    return () => { active = false; };
   }, [user]);
 
   const handlePendingCountChange = useCallback((count) => setPendingCount(count), []);
@@ -123,6 +143,12 @@ export default function App() {
 
   const handleProfileUpdate = (updatedUser) => {
     setUser(updatedUser);
+    if (user.role === 'driver') {
+      setDriverData((current) => (current ? {
+        ...current,
+        name: `${updatedUser.firstName || ''} ${updatedUser.lastName || ''}`.trim(),
+      } : current));
+    }
   };
   const isAdmin = user.role === 'admin';
   const adminPages = ['admin', 'drivers', 'user-log'];
@@ -177,7 +203,7 @@ export default function App() {
       ) : visiblePage === 'about' ? (
         <AboutPage />
       ) : visiblePage === 'account' ? (
-        <AccountPage user={user} sponsors={driver.sponsors} roleOverride={previewRole || null} readOnly={isPreview} onProfileUpdate={handleProfileUpdate} />
+        <AccountPage user={user} sponsors={driver.sponsors} points={driver.points} roleOverride={previewRole || null} readOnly={isPreview} onProfileUpdate={handleProfileUpdate} />
       ) : visiblePage === 'points' ? (
         <PointManagementPage user={previewUser} readOnly={isPreview} />
       ) : visiblePage === 'reports' ? (
@@ -188,7 +214,16 @@ export default function App() {
         <CatalogPage
           sponsors={driver.sponsors}
           userId={user.id}
-          onOrderPlaced={(order) => setDriverData((current) => (current ? { ...current, points: Number(current.points) - order.pointCost } : current))}
+          onOrderPlaced={(order) => setDriverData((current) => (current ? {
+            ...current,
+            points: Number(current.points) - order.pointCost,
+            recentPurchases: [{ id: order.orderId, item: order.productTitle, date: order.createdAt, points: Number(order.pointCost) }, ...current.recentPurchases],
+          } : current))}
+          onOrderCanceled={(order) => setDriverData((current) => (current ? {
+            ...current,
+            points: Number(current.points) + order.pointCost,
+            recentPurchases: current.recentPurchases.filter((purchase) => purchase.id !== order.orderId),
+          } : current))}
         />
       ) : visiblePage === 'application' ? (
         <MyApplicationPage user={previewUser} preview={isPreview} />

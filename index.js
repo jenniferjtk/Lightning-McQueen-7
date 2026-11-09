@@ -101,11 +101,15 @@ const hashPassword = (password) => bcrypt.hash(password, 12);
 const requireRuleManager = async (req, res, next) => {
   if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
   try {
-    const [rows] = await pool.execute('SELECT role FROM users WHERE user_id = ?', [req.session.userId]);
+    const [rows] = await pool.execute('SELECT user_id, role, sponsor_id FROM users WHERE user_id = ?', [req.session.userId]);
     if (!rows[0]) return res.status(401).json({ message: 'Session expired.' });
     if (!['admin', 'sponsor'].includes(rows[0].role)) {
       return res.status(403).json({ message: 'Sponsor access is required to manage point rules.' });
     }
+    if (rows[0].role === 'sponsor' && !rows[0].sponsor_id) {
+      return res.status(403).json({ message: 'Your account is not linked to a sponsor organization.' });
+    }
+    req.currentUser = rows[0];
     return next();
   } catch (error) {
     console.error('Point rule authorization failed:', error.message);
@@ -809,8 +813,16 @@ app.get('/api/sponsor/drivers', async (req, res) => {
 app.get('/api/sponsor-rules', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
   try {
+    const [users] = await pool.execute('SELECT role, sponsor_id FROM users WHERE user_id = ?', [req.session.userId]);
+    if (!users[0]) return res.status(401).json({ message: 'Session expired.' });
+    if (users[0].role === 'sponsor' && !users[0].sponsor_id) {
+      return res.status(403).json({ message: 'Your account is not linked to a sponsor organization.' });
+    }
+    const sponsorScoped = users[0].role === 'sponsor';
     const [rows] = await pool.execute(
-      'SELECT rule_id, sponsor_id, pt_value, description, frequency FROM sponsor_rules ORDER BY sponsor_id, rule_id',
+      `SELECT rule_id, sponsor_id, pt_value, description, frequency FROM sponsor_rules
+       ${sponsorScoped ? 'WHERE sponsor_id = ?' : ''} ORDER BY sponsor_id, rule_id`,
+      sponsorScoped ? [users[0].sponsor_id] : [],
     );
     return res.json({ rules: rows });
   } catch (error) {
@@ -822,6 +834,9 @@ app.get('/api/sponsor-rules', async (req, res) => {
 app.post('/api/sponsor-rules', requireRuleManager, async (req, res) => {
   const rule = validateSponsorRule(req.body || {});
   if (rule.error) return res.status(400).json({ message: rule.error });
+  if (req.currentUser.role === 'sponsor' && Number(rule.sponsorId) !== Number(req.currentUser.sponsor_id)) {
+    return res.status(403).json({ message: 'You can only create rules for your sponsor organization.' });
+  }
   try {
     const [sponsors] = await pool.execute('SELECT sponsor_id FROM sponsors WHERE sponsor_id = ?', [rule.sponsorId]);
     if (!sponsors[0]) return res.status(400).json({ message: 'Sponsor organization not found.' });
@@ -849,7 +864,17 @@ app.put('/api/sponsor-rules/:ruleId', requireRuleManager, async (req, res) => {
   const rule = validateSponsorRule(req.body || {});
   if (!Number.isSafeInteger(ruleId) || ruleId < 1) return res.status(400).json({ message: 'Invalid point rule.' });
   if (rule.error) return res.status(400).json({ message: rule.error });
+  if (req.currentUser.role === 'sponsor' && Number(rule.sponsorId) !== Number(req.currentUser.sponsor_id)) {
+    return res.status(403).json({ message: 'You can only manage rules for your sponsor organization.' });
+  }
   try {
+    if (req.currentUser.role === 'sponsor') {
+      const [existingRules] = await pool.execute('SELECT sponsor_id FROM sponsor_rules WHERE rule_id = ?', [ruleId]);
+      if (!existingRules[0]) return res.status(404).json({ message: 'Point rule not found.' });
+      if (Number(existingRules[0].sponsor_id) !== Number(req.currentUser.sponsor_id)) {
+        return res.status(403).json({ message: 'You can only manage rules for your sponsor organization.' });
+      }
+    }
     const [sponsors] = await pool.execute('SELECT sponsor_id FROM sponsors WHERE sponsor_id = ?', [rule.sponsorId]);
     if (!sponsors[0]) return res.status(400).json({ message: 'Sponsor organization not found.' });
     const [result] = await pool.execute(
@@ -879,7 +904,11 @@ app.delete('/api/sponsor-rules/:ruleId', requireRuleManager, async (req, res) =>
   const ruleId = Number(req.params.ruleId);
   if (!Number.isSafeInteger(ruleId) || ruleId < 1) return res.status(400).json({ message: 'Invalid point rule.' });
   try {
-    const [result] = await pool.execute('DELETE FROM sponsor_rules WHERE rule_id = ?', [ruleId]);
+    const sponsorScoped = req.currentUser.role === 'sponsor';
+    const [result] = await pool.execute(
+      `DELETE FROM sponsor_rules WHERE rule_id = ?${sponsorScoped ? ' AND sponsor_id = ?' : ''}`,
+      sponsorScoped ? [ruleId, req.currentUser.sponsor_id] : [ruleId],
+    );
     if (!result.affectedRows) return res.status(404).json({ message: 'Point rule not found.' });
     return res.status(204).end();
   } catch (error) {
@@ -2051,6 +2080,68 @@ app.get('/api/orders', requireRole('driver'), async (req, res) => {
   } catch (error) {
     console.error('Order history lookup failed:', error.message);
     return res.status(500).json({ message: 'Unable to load your orders.' });
+  }
+});
+
+app.post('/api/orders/:orderId/cancel', requireRole('driver'), async (req, res) => {
+  const orderId = parseId(req.params.orderId);
+  if (!orderId) return res.status(400).json({ message: 'Choose a valid order.' });
+
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    await connection.execute('SELECT user_id FROM users WHERE user_id = ? FOR UPDATE', [req.currentUser.user_id]);
+
+    const [rows] = await connection.execute(
+      `SELECT o.order_id, o.driver_user_id, o.sponsor_id, o.product_id, o.product_title, o.unit_price, o.point_cost,
+          o.status, o.created_at, s.name AS sponsor_name
+       FROM orders o JOIN sponsors s ON s.sponsor_id = o.sponsor_id
+       WHERE o.order_id = ? AND o.driver_user_id = ? FOR UPDATE`,
+      [orderId, req.currentUser.user_id],
+    );
+    const order = rows[0];
+    if (!order) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Order not found.' });
+    }
+    if (order.status !== 'pending') {
+      await connection.rollback();
+      return res.status(409).json({ message: 'Only pending orders can be canceled.', code: 'ORDER_NOT_CANCELLABLE' });
+    }
+
+    await connection.execute(
+      "UPDATE orders SET status = 'canceled' WHERE order_id = ? AND driver_user_id = ? AND status = 'pending'",
+      [orderId, req.currentUser.user_id],
+    );
+    await connection.execute(
+      'UPDATE sponsor_catalog SET stock_quantity = stock_quantity + 1 WHERE sponsor_id = ? AND product_id = ? AND stock_quantity IS NOT NULL',
+      [order.sponsor_id, order.product_id],
+    );
+    const [[stock]] = await connection.execute(
+      'SELECT stock_quantity FROM sponsor_catalog WHERE sponsor_id = ? AND product_id = ?',
+      [order.sponsor_id, order.product_id],
+    );
+    const pointBalance = await driverSponsorBalance(connection, req.currentUser.user_id, order.sponsor_id);
+    await connection.commit();
+
+    return res.json({
+      order: orderSummary({ ...order, status: 'canceled' }),
+      pointBalance,
+      stockQuantity: stock?.stock_quantity == null ? null : Number(stock.stock_quantity),
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch {
+        // Keep the original error for the API response.
+      }
+    }
+    console.error('Order cancellation failed:', error.message);
+    return res.status(500).json({ message: 'Unable to cancel this order.' });
+  } finally {
+    connection?.release();
   }
 });
 

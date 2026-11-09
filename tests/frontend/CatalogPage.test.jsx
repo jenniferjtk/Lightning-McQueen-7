@@ -271,10 +271,17 @@ describe('CatalogPage checkout', () => {
   const jsonResponse = (body, status = 200) => Promise.resolve({ ok: status < 400, status, json: async () => body });
 
   // Wraps the catalog stub with the order endpoints. placeOrder answers each POST.
-  const stubCheckoutApi = ({ orders = [], placeOrder = () => jsonResponse({ order: placed, pointBalance: 60, stockQuantity: null }, 201), address, catalog } = {}) => {
+  const stubCheckoutApi = ({
+    orders = [],
+    placeOrder = () => jsonResponse({ order: placed, pointBalance: 60, stockQuantity: null }, 201),
+    cancelOrder = () => jsonResponse({ order: { ...placed, status: 'canceled' }, pointBalance: 110, stockQuantity: null }),
+    address,
+    catalog,
+  } = {}) => {
     const catalogFetch = stubCatalogApi(catalog ? { 1: catalog } : {});
     const fetchMock = vi.fn((url, options = {}) => {
       if (url === '/api/orders' && options.method === 'POST') return placeOrder(JSON.parse(options.body));
+      if (/^\/api\/orders\/\d+\/cancel$/.test(url) && options.method === 'POST') return cancelOrder();
       if (url === '/api/orders') return jsonResponse({ orders });
       if (url === '/api/driver/shipping-address' && !options.method && address) return jsonResponse({ address });
       return catalogFetch(url, options);
@@ -406,9 +413,26 @@ describe('CatalogPage checkout', () => {
 
     const rows = within(await screen.findByRole('table')).getAllByRole('row').slice(1);
     expect(rows.map((row) => [...row.querySelectorAll('td')].map((cell) => cell.textContent))).toEqual([
-      ['Nov 4, 2026', 'Hard Drive', 'Acme Trucking', '50 pts'],
-      ['Oct 20, 2026', 'Backpack', 'Acme Trucking', '110 pts'],
+      ['Nov 4, 2026', 'Hard Drive', 'Acme Trucking', '50 pts', 'pending', 'Cancel order 7'],
+      ['Oct 20, 2026', 'Backpack', 'Acme Trucking', '110 pts', 'pending', 'Cancel order 6'],
     ]);
     expect(screen.queryByText('No orders yet')).not.toBeInTheDocument();
+  });
+
+  it('cancels a pending order, updates its status, and restores the sponsor balance', async () => {
+    const fetchMock = stubCheckoutApi({ orders: [placed] });
+    const onOrderCanceled = vi.fn();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<CatalogPage sponsors={[sponsors[0]]} userId={5} onOrderCanceled={onOrderCanceled} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel order 7' }));
+
+    expect(await screen.findByText('canceled')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cancel order 7' })).not.toBeInTheDocument();
+    expect(within(balanceBanner()).getByText('110 pts')).toBeInTheDocument();
+    expect(onOrderCanceled).toHaveBeenCalledWith({ ...placed, status: 'canceled' });
+    expect(fetchMock).toHaveBeenCalledWith('/api/orders/7/cancel', expect.objectContaining({
+      method: 'POST', credentials: 'include',
+    }));
   });
 });
