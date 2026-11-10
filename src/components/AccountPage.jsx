@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 
-export default function AccountPage({ user, sponsors = [], onProfileUpdate, roleOverride = null, readOnly = false }) {
+export default function AccountPage({ user, sponsors = [], points = 0, onProfileUpdate, roleOverride = null, readOnly = false }) {
   const isDriver = (roleOverride || user?.role) === 'driver';
   const isSponsor = (roleOverride || user?.role) === 'sponsor';
   const [form, setForm] = useState({
@@ -25,6 +25,10 @@ export default function AccountPage({ user, sponsors = [], onProfileUpdate, role
   const [sponsorDriversLoading, setSponsorDriversLoading] = useState(false);
   const [sponsorDriversError, setSponsorDriversError] = useState('');
   const [sponsorLinked, setSponsorLinked] = useState(true);
+  const [shippingLoading, setShippingLoading] = useState(false);
+  const [shippingSaving, setShippingSaving] = useState(false);
+  const [shippingMessage, setShippingMessage] = useState('');
+  const [shippingError, setShippingError] = useState('');
 
   useEffect(() => {
     setForm({
@@ -41,6 +45,25 @@ export default function AccountPage({ user, sponsors = [], onProfileUpdate, role
     });
     setSaved(false);
   }, [user]);
+
+  useEffect(() => {
+    if (!isDriver || readOnly) return undefined;
+    let cancelled = false;
+    setShippingLoading(true);
+    setShippingError('');
+    fetch('/api/driver/shipping-address', { credentials: 'include' })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.message || 'Unable to load your shipping address.');
+        return data.address;
+      })
+      .then((address) => {
+        if (!cancelled && address) setForm((current) => ({ ...current, ...address }));
+      })
+      .catch((requestError) => { if (!cancelled) setShippingError(requestError.message); })
+      .finally(() => { if (!cancelled) setShippingLoading(false); });
+    return () => { cancelled = true; };
+  }, [isDriver, readOnly, user?.id]);
 
   useEffect(() => {
     if (!isSponsor) return undefined;
@@ -75,6 +98,34 @@ export default function AccountPage({ user, sponsors = [], onProfileUpdate, role
     const updatedUser = { ...user, ...form };
     onProfileUpdate(updatedUser);
     setSaved(true);
+  };
+
+  const saveShippingAddress = async () => {
+    setShippingSaving(true);
+    setShippingError('');
+    setShippingMessage('');
+    try {
+      const response = await fetch('/api/driver/shipping-address', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          streetAddress: form.streetAddress,
+          city: form.city,
+          state: form.state,
+          zipCode: form.zipCode,
+          country: form.country,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || 'Unable to save your shipping address.');
+      setForm((current) => ({ ...current, ...data.address }));
+      setShippingMessage('Shipping address saved. It will be used in the Catalog too.');
+    } catch (requestError) {
+      setShippingError(requestError.message);
+    } finally {
+      setShippingSaving(false);
+    }
   };
 
   const updatePasswordField = (event) => {
@@ -215,12 +266,12 @@ export default function AccountPage({ user, sponsors = [], onProfileUpdate, role
                   {sponsors.map((sponsor) => <li key={sponsor.id}>{sponsor.name}</li>)}
                 </ul>
               </div>
-            ) : (
+            ) : sponsors.length === 1 ? (
               <label>
                 Sponsor
-                <input name="sponsorName" value={form.sponsorName} onChange={updateField} placeholder="Sponsor name" disabled={readOnly} />
+                <input value={sponsors[0].name} readOnly />
               </label>
-            ))}
+            ) : <p className="account-sponsors__label">Sponsor: {form.sponsorName || 'No sponsor yet'}</p>)}
 
             <form className="password-change" onSubmit={changePassword}>
               <h3>Change password</h3>
@@ -283,6 +334,7 @@ export default function AccountPage({ user, sponsors = [], onProfileUpdate, role
             className="edit-account-form__group"
           >
             <h2>Shipping address</h2>
+            {shippingLoading && <p role="status">Loading saved shipping address...</p>}
             <label>
               Street address
               <input name="streetAddress" value={form.streetAddress} onChange={updateField} placeholder="123 Main Street" disabled={readOnly} />
@@ -309,6 +361,16 @@ export default function AccountPage({ user, sponsors = [], onProfileUpdate, role
                 <input name="country" value={form.country} onChange={updateField} placeholder="United States" disabled={readOnly} />
               </label>
             </div>
+            {shippingError && <p role="alert" className="password-change__message password-change__message--error">{shippingError}</p>}
+            {shippingMessage && <p role="status" className="password-change__message password-change__message--success">{shippingMessage}</p>}
+            <button
+              className="edit-account-form__submit"
+              type="button"
+              onClick={saveShippingAddress}
+              disabled={readOnly || shippingLoading || shippingSaving}
+            >
+              {shippingSaving ? 'Saving address...' : 'Save shipping address'}
+            </button>
           </div>}
 
           {isDriver && <section
@@ -319,8 +381,8 @@ export default function AccountPage({ user, sponsors = [], onProfileUpdate, role
             className="edit-account-form__group account-points"
           >
             <h2>Points balance</h2>
-            <p className="account-points__value" aria-label="Points balance unavailable">— <span>pts</span></p>
-            <p className="account-points__message">Your points balance is not available yet.</p>
+            <p className="account-points__value" aria-label="Points balance">{Number(points || 0).toLocaleString()} <span>pts</span></p>
+            <p className="account-points__message">Your current earned balance across sponsors.</p>
           </section>}
 
           {isSponsor && <section

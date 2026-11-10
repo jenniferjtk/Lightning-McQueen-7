@@ -37,7 +37,12 @@ function stubApi({ catalog = [], products = [backpack, drive], stale = false, fa
       return { ok: true, status: 204, json: async () => ({}) };
     }
     if (url.startsWith('/api/sponsors/10/catalog/') && method === 'PATCH') {
-      return json({ productId: Number(url.split('/').pop()), categoryTag: JSON.parse(options.body).categoryTag.trim() || null });
+      const body = JSON.parse(options.body);
+      return json({
+        productId: Number(url.split('/').pop()),
+        ...(Object.hasOwn(body, 'categoryTag') && { categoryTag: body.categoryTag.trim() || null }),
+        ...(Object.hasOwn(body, 'stockQuantity') && { stockQuantity: body.stockQuantity }),
+      });
     }
     throw new Error(`Unexpected request: ${method} ${url}`);
   });
@@ -90,6 +95,19 @@ it('saves a category tag for a catalog product', async () => {
   const patch = fetchMock.mock.calls.find(([, options]) => options?.method === 'PATCH');
   expect(patch[0]).toBe('/api/sponsors/10/catalog/9');
   expect(JSON.parse(patch[1].body)).toEqual({ categoryTag: 'Tech gear' });
+});
+
+it('lets a sponsor set an item stock count', async () => {
+  const fetchMock = stubApi({ catalog: [{ ...drive, stockQuantity: null }] });
+  render(<SponsorCatalogPage user={user} />);
+
+  const stockInput = await screen.findByLabelText('Stock quantity for Hard Drive');
+  fireEvent.change(stockInput, { target: { value: '7' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save stock for Hard Drive' }));
+
+  expect(await screen.findByText('Saved stock quantity for "Hard Drive".')).toBeInTheDocument();
+  const patch = fetchMock.mock.calls.find(([, options]) => options?.method === 'PATCH');
+  expect(JSON.parse(patch[1].body)).toEqual({ stockQuantity: 7 });
 });
 
 it('shows the server message when an add fails', async () => {

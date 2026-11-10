@@ -101,11 +101,15 @@ const hashPassword = (password) => bcrypt.hash(password, 12);
 const requireRuleManager = async (req, res, next) => {
   if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
   try {
-    const [rows] = await pool.execute('SELECT role FROM users WHERE user_id = ?', [req.session.userId]);
+    const [rows] = await pool.execute('SELECT user_id, role, sponsor_id FROM users WHERE user_id = ?', [req.session.userId]);
     if (!rows[0]) return res.status(401).json({ message: 'Session expired.' });
     if (!['admin', 'sponsor'].includes(rows[0].role)) {
       return res.status(403).json({ message: 'Sponsor access is required to manage point rules.' });
     }
+    if (rows[0].role === 'sponsor' && !rows[0].sponsor_id) {
+      return res.status(403).json({ message: 'Your account is not linked to a sponsor organization.' });
+    }
+    req.currentUser = rows[0];
     return next();
   } catch (error) {
     console.error('Point rule authorization failed:', error.message);
@@ -814,7 +818,7 @@ app.get('/api/sponsor/drivers', async (req, res) => {
 
     const [drivers] = await pool.execute(
       `SELECT u.user_id AS id, u.first_name AS firstName, u.last_name AS lastName,
-              u.email, u.created_at AS createdAt, COALESCE(points.total, 0) AS points,
+              u.email, u.created_at AS createdAt, COALESCE(points.total, 0) - COALESCE(spent.total, 0) AS points,
               a.application_id AS applicationId, a.status, a.submitted_at AS submittedAt,
               a.decided_at AS decidedAt, s.name AS sponsorName
        FROM driver_applications a
@@ -826,6 +830,12 @@ app.get('/api/sponsor/drivers', async (req, res) => {
          JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
          GROUP BY l.affected_user_id
        ) points ON points.affected_user_id = u.user_id
+       LEFT JOIN (
+         SELECT driver_user_id, SUM(point_cost) AS total
+         FROM orders
+         WHERE status <> 'canceled'
+         GROUP BY driver_user_id
+       ) spent ON spent.driver_user_id = u.user_id
        WHERE a.sponsor_id = ? AND a.status = 'approved' AND u.role = 'driver'
        ORDER BY u.last_name, u.first_name, u.user_id`,
       [sponsorUser.sponsor_id],
@@ -843,8 +853,16 @@ app.get('/api/sponsor/drivers', async (req, res) => {
 app.get('/api/sponsor-rules', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
   try {
+    const [users] = await pool.execute('SELECT role, sponsor_id FROM users WHERE user_id = ?', [req.session.userId]);
+    if (!users[0]) return res.status(401).json({ message: 'Session expired.' });
+    if (users[0].role === 'sponsor' && !users[0].sponsor_id) {
+      return res.status(403).json({ message: 'Your account is not linked to a sponsor organization.' });
+    }
+    const sponsorScoped = users[0].role === 'sponsor';
     const [rows] = await pool.execute(
-      'SELECT rule_id, sponsor_id, pt_value, description, frequency FROM sponsor_rules ORDER BY sponsor_id, rule_id',
+      `SELECT rule_id, sponsor_id, pt_value, description, frequency FROM sponsor_rules
+       ${sponsorScoped ? 'WHERE sponsor_id = ?' : ''} ORDER BY sponsor_id, rule_id`,
+      sponsorScoped ? [users[0].sponsor_id] : [],
     );
     return res.json({ rules: rows });
   } catch (error) {
@@ -856,6 +874,9 @@ app.get('/api/sponsor-rules', async (req, res) => {
 app.post('/api/sponsor-rules', requireRuleManager, async (req, res) => {
   const rule = validateSponsorRule(req.body || {});
   if (rule.error) return res.status(400).json({ message: rule.error });
+  if (req.currentUser.role === 'sponsor' && Number(rule.sponsorId) !== Number(req.currentUser.sponsor_id)) {
+    return res.status(403).json({ message: 'You can only create rules for your sponsor organization.' });
+  }
   try {
     const [sponsors] = await pool.execute('SELECT sponsor_id FROM sponsors WHERE sponsor_id = ?', [rule.sponsorId]);
     if (!sponsors[0]) return res.status(400).json({ message: 'Sponsor organization not found.' });
@@ -883,7 +904,17 @@ app.put('/api/sponsor-rules/:ruleId', requireRuleManager, async (req, res) => {
   const rule = validateSponsorRule(req.body || {});
   if (!Number.isSafeInteger(ruleId) || ruleId < 1) return res.status(400).json({ message: 'Invalid point rule.' });
   if (rule.error) return res.status(400).json({ message: rule.error });
+  if (req.currentUser.role === 'sponsor' && Number(rule.sponsorId) !== Number(req.currentUser.sponsor_id)) {
+    return res.status(403).json({ message: 'You can only manage rules for your sponsor organization.' });
+  }
   try {
+    if (req.currentUser.role === 'sponsor') {
+      const [existingRules] = await pool.execute('SELECT sponsor_id FROM sponsor_rules WHERE rule_id = ?', [ruleId]);
+      if (!existingRules[0]) return res.status(404).json({ message: 'Point rule not found.' });
+      if (Number(existingRules[0].sponsor_id) !== Number(req.currentUser.sponsor_id)) {
+        return res.status(403).json({ message: 'You can only manage rules for your sponsor organization.' });
+      }
+    }
     const [sponsors] = await pool.execute('SELECT sponsor_id FROM sponsors WHERE sponsor_id = ?', [rule.sponsorId]);
     if (!sponsors[0]) return res.status(400).json({ message: 'Sponsor organization not found.' });
     const [result] = await pool.execute(
@@ -913,7 +944,11 @@ app.delete('/api/sponsor-rules/:ruleId', requireRuleManager, async (req, res) =>
   const ruleId = Number(req.params.ruleId);
   if (!Number.isSafeInteger(ruleId) || ruleId < 1) return res.status(400).json({ message: 'Invalid point rule.' });
   try {
-    const [result] = await pool.execute('DELETE FROM sponsor_rules WHERE rule_id = ?', [ruleId]);
+    const sponsorScoped = req.currentUser.role === 'sponsor';
+    const [result] = await pool.execute(
+      `DELETE FROM sponsor_rules WHERE rule_id = ?${sponsorScoped ? ' AND sponsor_id = ?' : ''}`,
+      sponsorScoped ? [ruleId, req.currentUser.sponsor_id] : [ruleId],
+    );
     if (!result.affectedRows) return res.status(404).json({ message: 'Point rule not found.' });
     return res.status(204).end();
   } catch (error) {
@@ -1237,6 +1272,33 @@ app.get('/api/sponsor/points/weekly', requireRole('sponsor'), async (req, res) =
   }
 });
 
+// Full audit backlog for the sponsor's own point rules. Joining through the
+// rule's sponsor_id prevents transactions made by another sponsor from leaking
+// into this organization's dashboard when a driver has multiple affiliations.
+app.get('/api/sponsor/points/transactions', requireRole('sponsor'), async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT l.log_id AS id,
+              CONCAT(driver.first_name, ' ', driver.last_name) AS driverName,
+              COALESCE(NULLIF(l.comment, ''), r.description) AS label,
+              r.pt_value AS amount,
+              DATE_FORMAT(l.timestamp, '%b %e, %Y') AS date
+       FROM point_audit_log l
+       JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+       JOIN users driver ON driver.user_id = l.affected_user_id
+       WHERE r.sponsor_id = ?
+       ORDER BY l.timestamp DESC, l.log_id DESC`,
+      [req.currentUser.sponsor_id],
+    );
+    return res.json({
+      entries: rows.map((entry) => ({ ...entry, amount: Number(entry.amount) })),
+    });
+  } catch (error) {
+    console.error('Sponsor point transaction backlog lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load point transactions.' });
+  }
+});
+
 app.get('/api/reports/sponsor-points', requireRole('admin', 'sponsor'), async (req, res) => {
   const { startDate, endDate, driverId = 'all' } = req.query;
   const isValidDate = (value) => {
@@ -1505,6 +1567,69 @@ app.post('/api/points/apply', requireRole('sponsor'), async (req, res) => {
   }
 });
 
+app.get('/api/driver/shipping-address', requireRole('driver'), async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT shipping_address, shipping_city, shipping_state, shipping_postal_code, shipping_country
+        FROM users u WHERE u.user_id = ?`,
+      [req.currentUser.user_id],
+    );
+    if (!rows[0]) return res.status(404).json({ message: 'Driver account not found.' });
+    return res.json({
+      address: {
+        streetAddress: rows[0].shipping_address || '',
+        city: rows[0].shipping_city || '',
+        state: rows[0].shipping_state || '',
+        zipCode: rows[0].shipping_postal_code || '',
+        country: rows[0].shipping_country || '',
+      },
+    });
+  } catch (error) {
+    console.error('Shipping address lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load your shipping address.' });
+  }
+});
+
+app.put('/api/driver/shipping-address', requireRole('driver'), async (req, res) => {
+  const fields = {
+    streetAddress: req.body?.streetAddress,
+    city: req.body?.city,
+    state: req.body?.state,
+    zipCode: req.body?.zipCode,
+    country: req.body?.country,
+  };
+  const lengths = { streetAddress: 255, city: 100, state: 100, zipCode: 20, country: 100 };
+  for (const [field, value] of Object.entries(fields)) {
+    if (typeof value !== 'string' || value.trim().length > lengths[field]) {
+      return res.status(400).json({ message: 'Enter a valid shipping address.' });
+    }
+  }
+  if (!fields.streetAddress.trim() || !fields.city.trim() || !fields.zipCode.trim() || !fields.country.trim()) {
+    return res.status(400).json({ message: 'Street address, city, ZIP code, and country are required.' });
+  }
+
+  try {
+    await pool.execute(
+      `UPDATE users
+       SET shipping_address = ?, shipping_city = ?, shipping_state = ?, shipping_postal_code = ?, shipping_country = ?
+       WHERE user_id = ?`,
+      [fields.streetAddress.trim(), fields.city.trim(), fields.state.trim(), fields.zipCode.trim(), fields.country.trim(), req.currentUser.user_id],
+    );
+    return res.json({
+      address: {
+        streetAddress: fields.streetAddress.trim(),
+        city: fields.city.trim(),
+        state: fields.state.trim(),
+        zipCode: fields.zipCode.trim(),
+        country: fields.country.trim(),
+      },
+    });
+  } catch (error) {
+    console.error('Shipping address update failed:', error.message);
+    return res.status(500).json({ message: 'Unable to save your shipping address.' });
+  }
+});
+
 // Dashboard data for the signed-in user. Sponsor applications determine the
 // driver's affiliations. The balance and recent updates come from the point log.
 app.get('/api/driver', async (req, res) => {
@@ -1527,11 +1652,14 @@ app.get('/api/driver', async (req, res) => {
     );
 
     const [[balance]] = await pool.execute(
-      `SELECT COALESCE(SUM(r.pt_value), 0) AS points
-       FROM point_audit_log l
-       JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
-       WHERE l.affected_user_id = ?`,
-      [req.session.userId],
+      `SELECT (SELECT COALESCE(SUM(r.pt_value), 0)
+               FROM point_audit_log l
+               JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+               WHERE l.affected_user_id = ?)
+            - (SELECT COALESCE(SUM(o.point_cost), 0)
+               FROM orders o
+               WHERE o.driver_user_id = ? AND o.status <> 'canceled') AS points`,
+      [req.session.userId, req.session.userId],
     );
     const [recent] = await pool.execute(
       `SELECT l.log_id, COALESCE(NULLIF(l.comment, ''), r.description) AS description,
@@ -1596,6 +1724,23 @@ const escapeLike = (text) => text.replace(/[\\%_]/g, (character) => `\\${charact
 const pointCost = (price, pointConversionRate) => {
   const rate = Number(pointConversionRate);
   return rate > 0 ? Math.ceil(Number((Number(price) / rate).toFixed(6))) : null;
+};
+
+// Points a driver can spend with one sponsor: what that sponsor's rules
+// awarded minus the driver's orders with it that weren't canceled. Takes the
+// pool or a transaction connection, so checkout reads it inside its lock.
+const driverSponsorBalance = async (executor, driverUserId, sponsorId) => {
+  const [[balance]] = await executor.execute(
+    `SELECT (SELECT COALESCE(SUM(r.pt_value), 0)
+             FROM point_audit_log l
+             JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+             WHERE l.affected_user_id = ? AND r.sponsor_id = ?)
+          - (SELECT COALESCE(SUM(o.point_cost), 0)
+             FROM orders o
+             WHERE o.driver_user_id = ? AND o.sponsor_id = ? AND o.status <> 'canceled') AS points`,
+    [driverUserId, sponsorId, driverUserId, sponsorId],
+  );
+  return Number(balance?.points || 0);
 };
 
 const catalogProduct = (row) => ({
@@ -1752,30 +1897,25 @@ app.get('/api/sponsors/:sponsorId/catalog', requireRole('driver', 'sponsor', 'ad
 
     const { stale } = await refreshCatalogCacheIfStale();
     const [rows] = await pool.execute(
-      `SELECT p.product_id, p.title, p.price, p.description, p.category, p.image_url, sc.category_tag
+      `SELECT p.product_id, p.title, p.price, p.description, p.category, p.image_url, sc.category_tag, sc.stock_quantity
        FROM sponsor_catalog sc
        JOIN cached_products p ON p.product_id = sc.product_id
        WHERE sc.sponsor_id = ?
        ORDER BY COALESCE(sc.category_tag, p.category), p.title`,
       [req.catalogSponsorId],
     );
-    let pointBalance = null;
-    if (req.currentUser.role === 'driver') {
-      const [[balance]] = await pool.execute(
-        `SELECT COALESCE(SUM(r.pt_value), 0) AS points
-         FROM point_audit_log l
-         JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
-         WHERE l.affected_user_id = ? AND r.sponsor_id = ?`,
-        [req.currentUser.user_id, req.catalogSponsorId],
-      );
-      pointBalance = Number(balance?.points || 0);
-    }
+    const pointBalance = req.currentUser.role === 'driver'
+      ? await driverSponsorBalance(pool, req.currentUser.user_id, req.catalogSponsorId)
+      : null;
     return res.json({
       sponsorId: sponsors[0].sponsor_id,
       sponsorName: sponsors[0].name,
       pointConversionRate: Number(sponsors[0].point_conversion_rate),
       pointBalance,
-      products: rows.map((row) => sponsorCatalogProduct(row, sponsors[0].point_conversion_rate)),
+      products: rows.map((row) => ({
+        ...sponsorCatalogProduct(row, sponsors[0].point_conversion_rate),
+        stockQuantity: row.stock_quantity == null ? null : Number(row.stock_quantity),
+      })),
       stale,
     });
   } catch (error) {
@@ -1811,17 +1951,35 @@ app.post('/api/sponsors/:sponsorId/catalog', requireRole('sponsor'), requireOwnC
 
 app.patch('/api/sponsors/:sponsorId/catalog/:productId', requireRole('sponsor'), requireOwnCatalog, async (req, res) => {
   const productId = parseId(req.params.productId);
+  const updatesCategory = Object.hasOwn(req.body || {}, 'categoryTag');
+  const updatesStock = Object.hasOwn(req.body || {}, 'stockQuantity');
   const { categoryTag, error: tagError } = parseCategoryTag(req.body?.categoryTag);
+  const stockQuantity = req.body?.stockQuantity;
   if (!productId) return res.status(400).json({ message: 'Choose a valid product.' });
-  if (tagError) return res.status(400).json({ message: tagError });
+  if (!updatesCategory && !updatesStock) return res.status(400).json({ message: 'Provide a category tag or stock quantity.' });
+  if (updatesCategory && tagError) return res.status(400).json({ message: tagError });
+  if (updatesStock && stockQuantity !== null && (!Number.isSafeInteger(stockQuantity) || stockQuantity < 0)) {
+    return res.status(400).json({ message: 'Stock quantity must be a non-negative whole number or blank.' });
+  }
 
   try {
+    const assignments = [];
+    const params = [];
+    if (updatesCategory) {
+      assignments.push('category_tag = ?');
+      params.push(categoryTag);
+    }
+    if (updatesStock) {
+      assignments.push('stock_quantity = ?');
+      params.push(stockQuantity);
+    }
+    params.push(req.catalogSponsorId, productId);
     const [result] = await pool.execute(
-      'UPDATE sponsor_catalog SET category_tag = ? WHERE sponsor_id = ? AND product_id = ?',
-      [categoryTag, req.catalogSponsorId, productId],
+      `UPDATE sponsor_catalog SET ${assignments.join(', ')} WHERE sponsor_id = ? AND product_id = ?`,
+      params,
     );
     if (!result.affectedRows) return res.status(404).json({ message: 'That product is not in your catalog.' });
-    return res.json({ productId, categoryTag });
+    return res.json({ productId, ...(updatesCategory && { categoryTag }), ...(updatesStock && { stockQuantity }) });
   } catch (error) {
     console.error('Catalog tag update failed:', error.message);
     return res.status(500).json({ message: 'Unable to save the category tag.' });
@@ -1890,6 +2048,234 @@ app.get('/api/sponsors/:sponsorId/catalog/:productId/live', requireRole('driver'
     });
   } catch (error) {
     return sendCatalogError(res, error, 'Live product check failed', 'Unable to confirm this product right now.');
+  }
+});
+
+const orderSummary = (row) => ({
+  orderId: Number(row.order_id),
+  sponsorId: Number(row.sponsor_id),
+  sponsorName: row.sponsor_name,
+  productId: Number(row.product_id),
+  productTitle: row.product_title,
+  unitPrice: Number(row.unit_price),
+  pointCost: Number(row.point_cost),
+  status: row.status,
+  createdAt: row.created_at,
+});
+
+// A driver redeems one item from a sponsor's catalog. The price is re-fetched
+// live and must match the point cost the driver confirmed; otherwise nothing is
+// charged and the new cost is returned so they can confirm again. Stock and
+// balance are checked inside a transaction holding the driver's row lock, so
+// two checkouts at once can't spend the same points or the last unit twice.
+app.post('/api/orders', requireRole('driver'), async (req, res) => {
+  const sponsorId = parseId(req.body?.sponsorId);
+  const productId = parseId(req.body?.productId);
+  const expectedPointCost = Number(req.body?.expectedPointCost);
+  if (!sponsorId || !productId) return res.status(400).json({ message: 'Choose a product from a sponsor catalog.' });
+  if (!Number.isSafeInteger(expectedPointCost) || expectedPointCost < 0) {
+    return res.status(400).json({ message: 'Confirm the item\'s point cost before ordering.' });
+  }
+
+  const driverId = req.currentUser.user_id;
+  let connection;
+  try {
+    if (!(await canViewSponsorCatalog(req.currentUser, sponsorId))) {
+      return res.status(403).json({ message: 'You do not have access to this sponsor\'s catalog.' });
+    }
+    const [catalogRows] = await pool.execute(
+      `SELECT s.name AS sponsor_name, s.point_conversion_rate
+       FROM sponsor_catalog sc
+       JOIN sponsors s ON s.sponsor_id = sc.sponsor_id
+       WHERE sc.sponsor_id = ? AND sc.product_id = ?`,
+      [sponsorId, productId],
+    );
+    if (!catalogRows[0]) return res.status(404).json({ message: 'That product is not in this sponsor\'s catalog.' });
+    const { sponsor_name: sponsorName, point_conversion_rate: rate } = catalogRows[0];
+
+    const [addressRows] = await pool.execute(
+      `SELECT shipping_address, shipping_city, shipping_state, shipping_postal_code, shipping_country
+       FROM users u WHERE u.user_id = ?`,
+      [driverId],
+    );
+    const address = addressRows[0];
+    if (!address?.shipping_address || !address.shipping_city || !address.shipping_postal_code || !address.shipping_country) {
+      return res.status(400).json({ message: 'Save a shipping address before placing an order.', code: 'ADDRESS_REQUIRED' });
+    }
+
+    const live = await fetchProduct(productId);
+    if (!live) {
+      return res.status(409).json({ message: 'This item is no longer available.', code: 'PRODUCT_UNAVAILABLE' });
+    }
+    await pool.execute(
+      `UPDATE cached_products SET title = ?, price = ?, description = ?, category = ?, image_url = ?
+       WHERE product_id = ?`,
+      [live.title, live.price, live.description, live.category, live.imageUrl, productId],
+    );
+    const cost = pointCost(live.price, rate);
+    if (cost === null) {
+      return res.status(409).json({ message: 'This sponsor has not set a point value yet.', code: 'PRICE_UNAVAILABLE' });
+    }
+    if (cost !== expectedPointCost) {
+      return res.status(409).json({
+        message: `The price changed to ${cost.toLocaleString('en-US')} points. Review the new cost and confirm again.`,
+        code: 'PRICE_CHANGED',
+        pointCost: cost,
+        price: live.price,
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    await connection.execute('SELECT user_id FROM users WHERE user_id = ? FOR UPDATE', [driverId]);
+
+    const [stockRows] = await connection.execute(
+      'SELECT stock_quantity FROM sponsor_catalog WHERE sponsor_id = ? AND product_id = ? FOR UPDATE',
+      [sponsorId, productId],
+    );
+    if (!stockRows[0]) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'That product is not in this sponsor\'s catalog.' });
+    }
+    const stock = stockRows[0].stock_quantity;
+    if (stock !== null && Number(stock) < 1) {
+      await connection.rollback();
+      return res.status(409).json({ message: 'This item is out of stock.', code: 'OUT_OF_STOCK' });
+    }
+
+    const balance = await driverSponsorBalance(connection, driverId, sponsorId);
+    if (cost > balance) {
+      await connection.rollback();
+      return res.status(409).json({
+        message: `You need ${(cost - balance).toLocaleString('en-US')} more points to order this item.`,
+        code: 'INSUFFICIENT_POINTS',
+        pointBalance: balance,
+        pointCost: cost,
+      });
+    }
+
+    if (stock !== null) {
+      await connection.execute(
+        'UPDATE sponsor_catalog SET stock_quantity = stock_quantity - 1 WHERE sponsor_id = ? AND product_id = ?',
+        [sponsorId, productId],
+      );
+    }
+    const [result] = await connection.execute(
+      `INSERT INTO orders (driver_user_id, sponsor_id, product_id, product_title, unit_price, point_cost,
+         shipping_address, shipping_city, shipping_state, shipping_postal_code, shipping_country)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [driverId, sponsorId, productId, live.title, live.price, cost, address.shipping_address,
+        address.shipping_city, address.shipping_state || null, address.shipping_postal_code, address.shipping_country],
+    );
+    await connection.commit();
+
+    return res.status(201).json({
+      order: orderSummary({
+        order_id: result.insertId,
+        sponsor_id: sponsorId,
+        sponsor_name: sponsorName,
+        product_id: productId,
+        product_title: live.title,
+        unit_price: live.price,
+        point_cost: cost,
+        status: 'pending',
+        created_at: new Date().toISOString(),
+      }),
+      pointBalance: balance - cost,
+      stockQuantity: stock === null ? null : Number(stock) - 1,
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch {
+        // The original error is the one worth reporting.
+      }
+    }
+    return sendCatalogError(res, error, 'Checkout failed', 'Unable to place this order.');
+  } finally {
+    connection?.release();
+  }
+});
+
+// The signed-in driver's orders across all sponsors, newest first.
+app.get('/api/orders', requireRole('driver'), async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT o.order_id, o.sponsor_id, s.name AS sponsor_name, o.product_id, o.product_title,
+              o.unit_price, o.point_cost, o.status, o.created_at
+       FROM orders o
+       JOIN sponsors s ON s.sponsor_id = o.sponsor_id
+       WHERE o.driver_user_id = ?
+       ORDER BY o.created_at DESC, o.order_id DESC`,
+      [req.currentUser.user_id],
+    );
+    return res.json({ orders: rows.map(orderSummary) });
+  } catch (error) {
+    console.error('Order history lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load your orders.' });
+  }
+});
+
+app.post('/api/orders/:orderId/cancel', requireRole('driver'), async (req, res) => {
+  const orderId = parseId(req.params.orderId);
+  if (!orderId) return res.status(400).json({ message: 'Choose a valid order.' });
+
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    await connection.execute('SELECT user_id FROM users WHERE user_id = ? FOR UPDATE', [req.currentUser.user_id]);
+
+    const [rows] = await connection.execute(
+      `SELECT o.order_id, o.driver_user_id, o.sponsor_id, o.product_id, o.product_title, o.unit_price, o.point_cost,
+          o.status, o.created_at, s.name AS sponsor_name
+       FROM orders o JOIN sponsors s ON s.sponsor_id = o.sponsor_id
+       WHERE o.order_id = ? AND o.driver_user_id = ? FOR UPDATE`,
+      [orderId, req.currentUser.user_id],
+    );
+    const order = rows[0];
+    if (!order) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Order not found.' });
+    }
+    if (order.status !== 'pending') {
+      await connection.rollback();
+      return res.status(409).json({ message: 'Only pending orders can be canceled.', code: 'ORDER_NOT_CANCELLABLE' });
+    }
+
+    await connection.execute(
+      "UPDATE orders SET status = 'canceled' WHERE order_id = ? AND driver_user_id = ? AND status = 'pending'",
+      [orderId, req.currentUser.user_id],
+    );
+    await connection.execute(
+      'UPDATE sponsor_catalog SET stock_quantity = stock_quantity + 1 WHERE sponsor_id = ? AND product_id = ? AND stock_quantity IS NOT NULL',
+      [order.sponsor_id, order.product_id],
+    );
+    const [[stock]] = await connection.execute(
+      'SELECT stock_quantity FROM sponsor_catalog WHERE sponsor_id = ? AND product_id = ?',
+      [order.sponsor_id, order.product_id],
+    );
+    const pointBalance = await driverSponsorBalance(connection, req.currentUser.user_id, order.sponsor_id);
+    await connection.commit();
+
+    return res.json({
+      order: orderSummary({ ...order, status: 'canceled' }),
+      pointBalance,
+      stockQuantity: stock?.stock_quantity == null ? null : Number(stock.stock_quantity),
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch {
+        // Keep the original error for the API response.
+      }
+    }
+    console.error('Order cancellation failed:', error.message);
+    return res.status(500).json({ message: 'Unable to cancel this order.' });
+  } finally {
+    connection?.release();
   }
 });
 

@@ -47,7 +47,9 @@ describe('GET /api/driver', () => {
       ],
     });
     const balanceCall = db.execute.mock.calls.find(([sql]) => sql.includes('COALESCE'));
-    expect(balanceCall[1]).toEqual([users.driver.user_id]);
+    // Earned points and non-canceled order spending are both scoped to the driver.
+    expect(balanceCall[1]).toEqual([users.driver.user_id, users.driver.user_id]);
+    expect(balanceCall[0]).toContain("o.status <> 'canceled'");
   });
 
   it('returns a zero balance and no updates for a driver with no point history', async () => {

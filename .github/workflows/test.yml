@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Lets someone redeploy main from the Actions tab without a new commit.
+  workflow_dispatch:
 
 jobs:
   test:
@@ -17,3 +19,58 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+
+  # Deploys main to AWS (the same stack `npm run deploy` updates) once the
+  # tests pass. Pull requests never deploy. Credentials and app settings come
+  # from the repository's Actions secrets; until they're added, this job
+  # skips the deploy instead of failing. Database migrations are not run here:
+  # apply them to Team07_DB by hand before merging code that needs them.
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    # One deploy at a time; a newer push waits for the running one to finish.
+    concurrency:
+      group: deploy-aws
+      cancel-in-progress: false
+    env:
+      HAS_DEPLOY_SECRETS: ${{ secrets.AWS_ACCESS_KEY_ID != '' && secrets.SERVERLESS_ACCESS_KEY != '' }}
+    steps:
+      - name: Skip when deploy secrets are missing
+        if: env.HAS_DEPLOY_SECRETS != 'true'
+        run: echo "::notice::Deploy skipped. Add AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and SERVERLESS_ACCESS_KEY in Settings > Secrets and variables > Actions."
+      - uses: actions/checkout@v4
+        if: env.HAS_DEPLOY_SECRETS == 'true'
+      - uses: actions/setup-node@v4
+        if: env.HAS_DEPLOY_SECRETS == 'true'
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        if: env.HAS_DEPLOY_SECRETS == 'true'
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: env.HAS_DEPLOY_SECRETS == 'true'
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
+      - name: Build and deploy
+        if: env.HAS_DEPLOY_SECRETS == 'true'
+        # The runner sometimes can't reach the Serverless API on the first
+        # try (connect timeout), so retry the deploy with a growing pause.
+        run: |
+          npm run build
+          for attempt in 1 2 3; do
+            npx --yes serverless@4.46.0 deploy && exit 0
+            echo "::warning::Deploy attempt $attempt failed."
+            [ "$attempt" -lt 3 ] && sleep $((attempt * 30))
+          done
+          exit 1
+        env:
+          SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT || '3306' }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
