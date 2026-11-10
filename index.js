@@ -249,9 +249,16 @@ app.post('/api/auth/login', async (req, res) => {
   if (!email || !password) return res.status(400).json({ message: 'Email and password are required.' });
 
   try {
-    const [rows] = await pool.execute('SELECT * FROM users WHERE email = ?', [email.trim().toLowerCase()]);
+    const username = email.trim().toLowerCase();
+    const [rows] = await pool.execute('SELECT * FROM users WHERE email = ?', [username]);
     const user = rows[0];
-    if (!user || !(await bcrypt.compare(password, user.password_hash))) {
+    const succeeded = Boolean(user && await bcrypt.compare(password, user.password_hash));
+    await pool.execute(
+      `INSERT INTO audit_events (category, affected_user_id, username, success)
+       VALUES ('login_attempt', ?, ?, ?)`,
+      [user?.user_id ?? null, username, succeeded],
+    );
+    if (!succeeded) {
       return res.status(401).json({ message: 'Invalid email or password.' });
     }
     req.session.userId = user.user_id;
@@ -281,7 +288,22 @@ app.post('/api/auth/change-password', async (req, res) => {
     }
 
     const passwordHash = await bcrypt.hash(newPassword, 12);
-    await pool.execute('UPDATE users SET password_hash = ? WHERE user_id = ?', [passwordHash, req.session.userId]);
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.execute('UPDATE users SET password_hash = ? WHERE user_id = ?', [passwordHash, req.session.userId]);
+      await connection.execute(
+        `INSERT INTO audit_events (category, affected_user_id, change_type)
+         VALUES ('password_change', ?, 'self-service')`,
+        [req.session.userId],
+      );
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
     return res.json({ message: 'Password updated successfully.' });
   } catch (error) {
     console.error('Password change failed:', error.message);
@@ -654,11 +676,29 @@ app.put('/api/admin/drivers/:driverId/password', requireAdmin, async (req, res) 
   }
   try {
     const passwordHash = await bcrypt.hash(password, 12);
-    const [result] = await pool.execute(
-      "UPDATE users SET password_hash = ? WHERE user_id = ? AND role = 'driver'",
-      [passwordHash, driverId],
-    );
-    if (!result.affectedRows) return res.status(404).json({ message: 'Driver account not found.' });
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [result] = await connection.execute(
+        "UPDATE users SET password_hash = ? WHERE user_id = ? AND role = 'driver'",
+        [passwordHash, driverId],
+      );
+      if (!result.affectedRows) {
+        await connection.rollback();
+        return res.status(404).json({ message: 'Driver account not found.' });
+      }
+      await connection.execute(
+        `INSERT INTO audit_events (category, actor_user_id, affected_user_id, change_type)
+         VALUES ('password_change', ?, ?, 'admin-reset')`,
+        [req.session.userId, driverId],
+      );
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
     return res.json({ message: 'Driver password reset.' });
   } catch (error) {
     console.error('Driver password reset failed:', error.message);
@@ -1015,7 +1055,7 @@ app.patch('/api/applications/:applicationId/decide', requireRole('sponsor'), asy
 
   try {
     const [rows] = await pool.execute(
-      'SELECT sponsor_id, status FROM driver_applications WHERE application_id = ?',
+      'SELECT sponsor_id, driver_user_id, status FROM driver_applications WHERE application_id = ?',
       [req.params.applicationId],
     );
     if (!rows[0]) return res.status(404).json({ message: 'No application found with that id.' });
@@ -1260,6 +1300,100 @@ app.get('/api/reports/sponsor-points', requireRole('admin', 'sponsor'), async (r
   } catch (error) {
     console.error('Sponsor point report lookup failed:', error.message);
     return res.status(500).json({ message: 'Unable to load the sponsor point report.' });
+  }
+});
+
+app.get('/api/reports/audit-log', requireRole('admin', 'sponsor'), async (req, res) => {
+  const { startDate, endDate, category } = req.query;
+  const isValidDate = (value) => {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const date = new Date(`${value}T00:00:00Z`);
+    return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+  };
+  const categories = ['driver_application', 'point_change', 'password_change', 'login_attempt'];
+  if (!isValidDate(startDate) || !isValidDate(endDate) || startDate > endDate) {
+    return res.status(400).json({ message: 'Choose a valid date range.' });
+  }
+  if (!categories.includes(category)) {
+    return res.status(400).json({ message: 'Choose a valid audit log category.' });
+  }
+
+  const params = [startDate, endDate, category];
+  const sponsorCondition = req.currentUser.role === 'sponsor'
+    ? `AND (
+         (events.category = 'driver_application' AND events.sponsor_id = ?)
+         OR (events.category = 'point_change' AND events.sponsor_id = ? AND EXISTS (
+           SELECT 1 FROM driver_applications a
+           WHERE a.driver_user_id = events.driver_id
+             AND a.sponsor_id = ? AND a.status = 'approved'
+         ))
+         OR (events.category IN ('password_change', 'login_attempt') AND EXISTS (
+           SELECT 1 FROM driver_applications a
+           WHERE a.driver_user_id = events.driver_id
+             AND a.sponsor_id = ? AND a.status = 'approved'
+         ))
+       )`
+    : '';
+  if (req.currentUser.role === 'sponsor') {
+    params.push(
+      req.currentUser.sponsor_id,
+      req.currentUser.sponsor_id,
+      req.currentUser.sponsor_id,
+      req.currentUser.sponsor_id,
+    );
+  }
+
+  try {
+    const [rows] = await pool.execute(
+      `SELECT events.category, DATE_FORMAT(events.occurred_at, '%Y-%m-%d %H:%i:%s') AS date,
+              sponsors.name AS sponsorName,
+              events.sponsorUserName,
+              CONCAT(driver.first_name, ' ', driver.last_name) AS driverName,
+              events.driver_id AS driverId, events.status, events.points, events.reason,
+              events.username, events.change_type AS changeType, events.success
+       FROM (
+         SELECT 'driver_application' AS category, a.decided_at AS occurred_at, a.sponsor_id,
+                NULL AS sponsorUserName, a.driver_user_id AS driver_id, a.status,
+                NULL AS points, NULL AS reason,
+                NULL AS username, NULL AS change_type, NULL AS success
+         FROM driver_applications a
+         WHERE a.status IN ('approved', 'rejected') AND a.decided_at IS NOT NULL
+         UNION ALL
+         SELECT e.category, e.occurred_at, e.sponsor_id, NULL AS sponsorUserName,
+                e.affected_user_id AS driver_id, e.status, NULL AS points, e.reason,
+                e.username, e.change_type, e.success
+         FROM audit_events e
+         WHERE e.category IN ('password_change', 'login_attempt')
+         UNION ALL
+         SELECT 'point_change' AS category, l.timestamp AS occurred_at, r.sponsor_id,
+                CONCAT(actor.first_name, ' ', actor.last_name) AS sponsorUserName,
+                l.affected_user_id AS driver_id, NULL AS status, r.pt_value AS points,
+                COALESCE(NULLIF(l.comment, ''), NULLIF(r.description, ''), 'Unspecified') AS reason,
+                NULL AS username, NULL AS change_type, NULL AS success
+         FROM point_audit_log l
+         JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+         JOIN users actor ON actor.user_id = l.actor_id
+       ) events
+       JOIN users driver ON driver.user_id = events.driver_id AND driver.role = 'driver'
+       LEFT JOIN sponsors ON sponsors.sponsor_id = events.sponsor_id
+       WHERE events.occurred_at >= ?
+         AND events.occurred_at < DATE_ADD(?, INTERVAL 1 DAY)
+         AND events.category = ?
+         ${sponsorCondition}
+       ORDER BY events.occurred_at DESC`,
+      [params[0], params[1], params[2], ...params.slice(3)],
+    );
+    return res.json({
+      entries: rows.map((row) => ({
+        ...row,
+        driverId: Number(row.driverId),
+        points: row.points === null ? null : Number(row.points),
+        success: row.success === null ? null : Number(row.success) === 1,
+      })),
+    });
+  } catch (error) {
+    console.error('Audit log report lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load the audit log report.' });
   }
 });
 

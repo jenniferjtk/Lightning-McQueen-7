@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import App from '../../src/App.jsx';
 
 // Renders the whole app for a signed-in user at a given path. Page tests
@@ -18,6 +18,8 @@ function renderAs(role, path) {
     if (url.includes('/api/auth/me')) return json({ user });
     if (url === '/api/driver') return json({ id: 1, name: 'Test User', sponsorName: '', points: 0, balanceNotifications: [], recentPurchases: [] });
     if (url.includes('/api/sponsor/drivers')) return json({ sponsorLinked: true, drivers: [] });
+    if (url.includes('/api/reports/audit-log')) return json({ entries: [] });
+    if (url.includes('/api/reports/sponsor-points')) return json({ entries: [] });
     if (url.includes('/api/sponsor-rules')) return json({ rules: [] });
     if (url.includes('/catalog')) return json({ products: [], categories: [], stale: false });
     return json([]);
@@ -46,14 +48,26 @@ it('routes sponsors to the catalog page', async () => {
 
 it('shows the reports page and navigation link for admins', async () => {
   renderAs('admin', '/reports');
-  expect(await screen.findByRole('heading', { name: 'Sponsor Report' })).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { name: 'Audit Log' })).toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'Sponsor Report' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Reports' })).toBeInTheDocument();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Choose a report' }), {
+    target: { value: 'sponsor-points' },
+  });
+  expect(await screen.findByRole('heading', { name: 'Sponsor Report' })).toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'Audit Log' })).not.toBeInTheDocument();
 });
 
 it('shows the reports page and navigation link for sponsors', async () => {
   renderAs('sponsor', '/reports');
-  expect(await screen.findByRole('heading', { name: 'Sponsor Report' })).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { name: 'Audit Log' })).toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'Sponsor Report' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Reports' })).toBeInTheDocument();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Choose a report' }), {
+    target: { value: 'sponsor-points' },
+  });
+  expect(await screen.findByRole('heading', { name: 'Sponsor Report' })).toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'Audit Log' })).not.toBeInTheDocument();
 });
 
 it('keeps drivers out of sponsor-only pages', async () => {

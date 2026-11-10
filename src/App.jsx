@@ -7,6 +7,7 @@ import AboutPage from './components/AboutPage.jsx';
 import AccountPage from './components/AccountPage.jsx';
 import PointManagementPage from './components/PointManagementPage.jsx';
 import SponsorReportsPage from './components/SponsorReportsPage.jsx';
+import AuditLogReport from './components/AuditLogReport.jsx';
 import SponsorsPage from './components/SponsorsPage.jsx';
 import MyApplicationPage from './components/MyApplicationPage.jsx';
 import AdminHomePage from './components/AdminHomePage.jsx';
@@ -40,6 +41,7 @@ export default function App() {
   const [pendingCount, setPendingCount] = useState(0);
   const [driverData, setDriverData] = useState(null);
   const [previewRole, setPreviewRole] = useState(null);
+  const [selectedReport, setSelectedReport] = useState('audit-log');
   const [currentPage, setCurrentPage] = useState(() => {
     const pathname = window.location.pathname;
     if (pathname === '/about') return 'about';
@@ -180,7 +182,27 @@ export default function App() {
       ) : visiblePage === 'points' ? (
         <PointManagementPage user={previewUser} readOnly={isPreview} />
       ) : visiblePage === 'reports' ? (
-        <SponsorReportsPage user={previewUser} />
+        <main className="reports-page">
+          <header className="reports-page__intro">
+            <p className="reports-page__eyebrow">Insights &amp; reporting</p>
+            <h1>Reports that keep every point in view.</h1>
+            <p>Explore driver activity, understand every balance change, and export a report when you need to share it.</p>
+          </header>
+          <div className="reports-selection">
+            <label htmlFor="report-selection">Choose a report</label>
+            <select
+              id="report-selection"
+              value={selectedReport}
+              onChange={(event) => setSelectedReport(event.target.value)}
+            >
+              <option value="audit-log">Audit Log</option>
+              <option value="sponsor-points">Driver Point Report</option>
+            </select>
+          </div>
+          {selectedReport === 'audit-log'
+            ? <AuditLogReport />
+            : <SponsorReportsPage user={previewUser} />}
+        </main>
       ) : visiblePage === 'sponsors' ? (
         <SponsorsPage user={previewUser} readOnly={isPreview} />
       ) : visiblePage === 'catalog' ? (

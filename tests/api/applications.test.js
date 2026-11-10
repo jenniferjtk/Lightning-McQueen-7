@@ -34,7 +34,7 @@ describe('driver applications', () => {
     const res = await agent.post('/api/applications').send({ sponsorId: 10 }).expect(201);
 
     expect(res.body).toEqual({ application_id: 99, sponsor_id: 10, status: 'pending' });
-    const insert = db.execute.mock.calls.find(([sql]) => sql.includes('INSERT'));
+    const insert = db.execute.mock.calls.find(([sql]) => sql.includes('INSERT INTO driver_applications'));
     expect(insert[1]).toEqual([users.driver.user_id, 10]);
   });
 
@@ -72,7 +72,9 @@ describe('sponsor decisions', () => {
       ['FROM driver_applications WHERE application_id = ?', [{ sponsor_id: 11, status: 'pending' }]],
     ]);
 
-    await agent.patch('/api/applications/5/decide').send({ decision: 'approved' }).expect(403);
+    await agent.patch('/api/applications/5/decide')
+      .send({ decision: 'approved', reason: 'Reviewed application' })
+      .expect(403);
   });
 
   it('cannot decide an application that is no longer pending', async () => {
@@ -82,19 +84,27 @@ describe('sponsor decisions', () => {
       ['FROM driver_applications WHERE application_id = ?', [{ sponsor_id: 10, status: 'withdrawn' }]],
     ]);
 
-    await agent.patch('/api/applications/5/decide').send({ decision: 'approved' }).expect(409);
+    await agent.patch('/api/applications/5/decide')
+      .send({ decision: 'approved', reason: 'Reviewed application' })
+      .expect(409);
   });
 
   it('approves a pending application', async () => {
     const agent = await signIn(app, users.sponsor);
     mockQueries([
       roleLookup,
-      ['FROM driver_applications WHERE application_id = ?', [{ sponsor_id: 10, status: 'pending' }]],
+      ['FROM driver_applications WHERE application_id = ?', [{ sponsor_id: 10, driver_user_id: 1, status: 'pending' }]],
       ['UPDATE driver_applications', { affectedRows: 1 }],
     ]);
 
-    const res = await agent.patch('/api/applications/5/decide').send({ decision: 'approved' }).expect(200);
+    const res = await agent.patch('/api/applications/5/decide')
+      .send({ decision: 'approved', reason: 'Strong safety record' })
+      .expect(200);
 
     expect(res.body).toEqual({ application_id: 5, status: 'approved' });
+    const [query, params] = db.execute.mock.calls.find(([sql]) => sql.includes('UPDATE driver_applications'));
+    expect(query).toContain('decided_at = NOW()');
+    expect(query).not.toContain('decision_reason');
+    expect(params).toEqual(['approved', '5']);
   });
 });
