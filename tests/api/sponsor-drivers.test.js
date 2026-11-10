@@ -58,7 +58,7 @@ describe('sponsor driver list', () => {
     mockQueries([['SELECT role, sponsor_id FROM users', [{ ...users.sponsor, sponsor_id: null }]]]);
 
     await agent.get('/api/sponsor/drivers').expect(200, { sponsorLinked: false, drivers: [] });
-    expect(db.execute).toHaveBeenCalledTimes(2);
+    expect(db.execute).toHaveBeenCalledTimes(1);
   });
 });
 

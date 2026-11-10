@@ -818,6 +818,10 @@ body {
 }
 
 .reports-page { margin: 0 auto; max-width: 1280px; padding: 2.5rem 2rem 4rem; }
+.reports-selection { align-items: end; display: grid; gap: 0.4rem; grid-template-columns: minmax(180px, 360px); margin: 0 0 1rem; }
+.reports-selection label { color: var(--color-slate); font-size: 0.82rem; font-weight: 700; }
+.reports-selection select { background: #fff; border: 1px solid #cbd2d8; border-radius: 5px; color: var(--color-asphalt); font: inherit; min-height: 2.65rem; min-width: 0; padding: 0.55rem 0.65rem; }
+.reports-selection select:focus { border-color: var(--color-steel); outline: 2px solid rgba(58, 110, 165, 0.18); }
 .reports-page__intro { margin: 0 0 2rem; max-width: 740px; }
 .reports-page__eyebrow, .reports-panel__eyebrow { color: var(--color-steel); font-size: 0.76rem; font-weight: 800; letter-spacing: 0.08em; margin: 0 0 0.5rem; text-transform: uppercase; }
 .reports-page__intro h1 { color: var(--color-asphalt); font-size: clamp(2rem, 4vw, 3rem); letter-spacing: -0.035em; line-height: 1.08; margin: 0; }

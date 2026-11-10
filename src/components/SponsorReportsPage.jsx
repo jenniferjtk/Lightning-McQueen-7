@@ -132,13 +132,6 @@ export default function SponsorReportsPage({ user }) {
   };
 
   return (
-    <main className="reports-page">
-      <header className="reports-page__intro">
-        <p className="reports-page__eyebrow">Insights &amp; reporting</p>
-        <h1>Reports that keep every point in view.</h1>
-        <p>Explore driver activity, understand every balance change, and export a report when you need to share it.</p>
-      </header>
-
       <section className="reports-panel" aria-labelledby="reports-title">
         <div className="reports-panel__heading">
           <div>
@@ -252,6 +245,5 @@ export default function SponsorReportsPage({ user }) {
           </div>
         )}
       </section>
-    </main>
   );
 }

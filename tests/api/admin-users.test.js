@@ -40,6 +40,20 @@ it('hashes a sponsor password reset', async () => {
   expect(await bcrypt.compare('new-password', stored)).toBe(true);
 });
 
+it('records administrator resets of driver passwords', async () => {
+  const agent = await signIn(app, users.admin);
+  mockQueries([
+    roleLookup,
+    ["AND role = 'driver'", { affectedRows: 1 }],
+    ["VALUES ('password_change', ?, ?, 'admin-reset')", { insertId: 1 }],
+  ]);
+  await agent.put('/api/admin/drivers/1/password').send({ password: 'new-password' }).expect(200);
+  expect(db.execute).toHaveBeenCalledWith(
+    expect.stringContaining("VALUES ('password_change', ?, ?, 'admin-reset')"),
+    [users.admin.user_id, users.driver.user_id],
+  );
+});
+
 it('deletes a sponsor and reports related-record conflicts', async () => {
   const agent = await signIn(app, users.admin);
   mockQueries([["DELETE FROM users WHERE user_id = ? AND role = 'sponsor'", { affectedRows: 1 }], roleLookup]);
