@@ -367,6 +367,49 @@ app.get('/api/admin/drivers', requireAdmin, async (req, res) => {
   }
 });
 
+// Export is kept server-side so it is both admin-protected and independent of
+// the filters currently applied in the user-management screen.
+app.get('/api/admin/drivers.csv', requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT u.user_id, u.email, u.first_name, u.last_name, u.created_at,
+              GROUP_CONCAT(DISTINCT s.name ORDER BY s.name SEPARATOR ', ') AS affiliation
+       FROM users u
+       LEFT JOIN driver_applications a ON a.driver_user_id = u.user_id AND a.status = 'approved'
+       LEFT JOIN sponsors s ON s.sponsor_id = a.sponsor_id
+       WHERE u.role = 'driver'
+       GROUP BY u.user_id, u.email, u.first_name, u.last_name, u.created_at
+       ORDER BY u.created_at DESC, u.user_id DESC`,
+    );
+    const csvValue = (value) => {
+      const text = String(value ?? '');
+      // Prevent spreadsheet applications from interpreting user-entered data as a formula.
+      const safeText = /^[=+\-@]/.test(text) ? `'${text}` : text;
+      return `"${safeText.replace(/"/g, '""')}"`;
+    };
+    const csv = [
+      ['Driver ID', 'First name', 'Last name', 'Email', 'Sponsor affiliation', 'Joined'],
+      ...rows.map((driver) => [
+        driver.user_id,
+        driver.first_name,
+        driver.last_name,
+        driver.email,
+        driver.affiliation,
+        driver.created_at,
+      ]),
+    ].map((row) => row.map(csvValue).join(',')).join('\r\n');
+
+    res.set({
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="drivers.csv"',
+    });
+    return res.send(`\uFEFF${csv}`);
+  } catch (error) {
+    console.error('Driver CSV export failed:', error.message);
+    return res.status(500).json({ message: 'Unable to export driver accounts.' });
+  }
+});
+
 app.get('/api/admin/sponsor-links', requireAdmin, async (req, res) => {
   try {
     const [sponsors] = await pool.execute('SELECT sponsor_id, name FROM sponsors ORDER BY name');

@@ -1026,7 +1026,10 @@ body {
 .admin-driver-form button:disabled, .admin-driver-edit button:disabled, .admin-driver-table__actions button:disabled { cursor: wait; opacity: 0.7; }
 .admin-driver-list__header { align-items: end; display: flex; gap: 1rem; justify-content: space-between; margin-bottom: 1.25rem; }
 .admin-driver-list__header .card__title { margin: 0; }
+.admin-driver-list__tools { align-items: end; display: flex; gap: 0.75rem; }
 .admin-driver-list__search { width: min(100%, 280px); }
+.admin-driver-export { background: var(--color-ink); border-radius: 4px; color: #fff; font-size: 0.85rem; font-weight: 700; padding: 0.72rem 0.9rem; text-decoration: none; white-space: nowrap; }
+.admin-driver-export:hover { background: var(--color-slate); }
 .admin-driver-list__table-wrap { overflow-x: auto; }
 .admin-driver-table { border-collapse: collapse; min-width: 720px; width: 100%; }
 .admin-driver-table th { border-bottom: 1px solid var(--color-line); color: var(--color-slate); font-size: 0.78rem; padding: 0 0.5rem 0.6rem; text-align: left; text-transform: uppercase; }
@@ -1649,6 +1652,14 @@ body {
     align-items: flex-start;
     flex-direction: column;
   }
+
+  .admin-driver-list__tools {
+    align-items: stretch;
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .admin-driver-export { text-align: center; }
 
   .admin-driver-form,
   .admin-driver-edit {

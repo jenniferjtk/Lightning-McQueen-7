@@ -85,6 +85,19 @@ it('shows driver and sponsor affiliations on the same page', async () => {
   expect(within(screen.getByRole('region', { name: 'Sponsors' })).getByText('1', { selector: '.admin-account-count' })).toBeInTheDocument();
 });
 
+it('offers a CSV download for the complete driver list', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url) => ({
+    ok: true,
+    json: async () => url.endsWith('/drivers') ? { drivers: [] }
+      : url.endsWith('/sponsor-links') ? { sponsors: [], sponsorUsers: [] }
+        : { sponsors: [] },
+  })));
+  render(<AdminDriversPage />);
+
+  const drivers = within(await screen.findByRole('region', { name: 'Drivers' }));
+  expect(drivers.getByRole('link', { name: 'Download CSV' })).toHaveAttribute('href', '/api/admin/drivers.csv');
+});
+
 it('searches sponsor rows by organization name', async () => {
   vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url) => ({
     ok: true,
