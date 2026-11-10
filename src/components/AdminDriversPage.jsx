@@ -439,7 +439,10 @@ export default function AdminDriversPage() {
             <h2 className="card__title" id="driver-list-title">Drivers</h2>
             <span className="admin-account-count">{drivers.length}</span>
           </div>
-          <label className="admin-driver-list__search">Search drivers<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Name or email" /></label>
+          <div className="admin-driver-list__tools">
+            <a className="admin-driver-export" href="/api/admin/drivers.csv" download>Download CSV</a>
+            <label className="admin-driver-list__search">Search drivers<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Name or email" /></label>
+          </div>
         </div>
 
         {loading ? <p className="purchases-card__empty">Loading drivers...</p> : filteredDrivers.length === 0 ? (
