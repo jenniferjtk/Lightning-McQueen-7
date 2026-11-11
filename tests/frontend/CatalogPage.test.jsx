@@ -413,26 +413,100 @@ describe('CatalogPage checkout', () => {
 
     const rows = within(await screen.findByRole('table')).getAllByRole('row').slice(1);
     expect(rows.map((row) => [...row.querySelectorAll('td')].map((cell) => cell.textContent))).toEqual([
-      ['Nov 4, 2026', 'Hard Drive', 'Acme Trucking', '50 pts', 'pending', 'Cancel order 7'],
-      ['Oct 20, 2026', 'Backpack', 'Acme Trucking', '110 pts', 'pending', 'Cancel order 6'],
+      ['Nov 4, 2026', 'Hard Drive', 'Acme Trucking', '50 pts', 'Pending', 'Cancel'],
+      ['Oct 20, 2026', 'Backpack', 'Acme Trucking', '110 pts', 'Pending', 'Cancel'],
     ]);
     expect(screen.queryByText('No orders yet')).not.toBeInTheDocument();
   });
 
-  it('cancels a pending order, updates its status, and restores the sponsor balance', async () => {
+  it('asks for confirmation, then cancels a pending order and returns its points', async () => {
     const fetchMock = stubCheckoutApi({ orders: [placed] });
     const onOrderCanceled = vi.fn();
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<CatalogPage sponsors={[sponsors[0]]} userId={5} onOrderCanceled={onOrderCanceled} />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel order 7' }));
 
-    expect(await screen.findByText('canceled')).toBeInTheDocument();
+    const confirmation = screen.getByRole('dialog', { name: 'Cancel order #7 for Hard Drive? 50 pts will be returned to your Acme Trucking balance.' });
+    const isCancelRequest = ([url]) => url === '/api/orders/7/cancel';
+    expect(fetchMock.mock.calls.some(isCancelRequest)).toBe(false);
+
+    fireEvent.click(within(confirmation).getByRole('button', { name: 'Yes, cancel order' }));
+
+    expect(await screen.findByText('Order #7 canceled. 50 pts returned to your Acme Trucking balance.')).toBeInTheDocument();
+    expect(within(screen.getByRole('table')).getByText('Canceled')).toHaveClass('catalog-order-status--canceled');
     expect(screen.queryByRole('button', { name: 'Cancel order 7' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(within(balanceBanner()).getByText('110 pts')).toBeInTheDocument();
     expect(onOrderCanceled).toHaveBeenCalledWith({ ...placed, status: 'canceled' });
     expect(fetchMock).toHaveBeenCalledWith('/api/orders/7/cancel', expect.objectContaining({
       method: 'POST', credentials: 'include',
     }));
+  });
+
+  it('keeps the order when the driver backs out of canceling', async () => {
+    const fetchMock = stubCheckoutApi({ orders: [placed] });
+    render(<CatalogPage sponsors={[sponsors[0]]} userId={5} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel order 7' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Keep order' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel order 7' })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/orders/7/cancel')).toBe(false);
+  });
+
+  it('shows why a cancellation was refused and leaves the order as it was', async () => {
+    stubCheckoutApi({
+      orders: [placed],
+      cancelOrder: () => jsonResponse({ message: 'Only pending orders can be canceled.', code: 'ORDER_NOT_CANCELLABLE' }, 409),
+    });
+    render(<CatalogPage sponsors={[sponsors[0]]} userId={5} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel order 7' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, cancel order' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Only pending orders can be canceled.');
+    expect(within(screen.getByRole('table')).getByText('Pending')).toBeInTheDocument();
+  });
+
+  it('shows each order status as a labeled badge', async () => {
+    stubCheckoutApi({ orders: ['pending', 'shipped', 'delivered', 'canceled'].map((status, index) => ({ ...placed, orderId: index + 1, status })) });
+    render(<CatalogPage sponsors={[sponsors[0]]} userId={5} />);
+
+    const table = await screen.findByRole('table');
+    for (const label of ['Pending', 'Shipped', 'Delivered', 'Canceled']) {
+      expect(within(table).getByText(label)).toHaveClass(`catalog-order-status--${label.toLowerCase()}`);
+    }
+    // Only the pending order can be canceled.
+    expect(within(table).getAllByRole('button', { name: /^Cancel order/ }).map((button) => button.getAttribute('aria-label'))).toEqual(['Cancel order 1']);
+  });
+
+  it('filters order history by status and explains when nothing matches', async () => {
+    stubCheckoutApi({
+      orders: [
+        { ...placed, orderId: 3, productTitle: 'Jacket', status: 'shipped' },
+        { ...placed, orderId: 2, productTitle: 'Backpack', status: 'canceled' },
+        { ...placed, orderId: 1, productTitle: 'Hard Drive', status: 'pending' },
+      ],
+    });
+    render(<CatalogPage sponsors={[sponsors[0]]} userId={5} />);
+    const itemTitles = () => within(screen.getByRole('table')).getAllByRole('row').slice(1)
+      .map((row) => row.querySelectorAll('td')[1].textContent);
+
+    const filter = await screen.findByLabelText('Show');
+    expect([...filter.options].map((option) => option.textContent)).toEqual([
+      'All orders (3)', 'Pending (1)', 'Shipped (1)', 'Delivered (0)', 'Canceled (1)',
+    ]);
+    expect(itemTitles()).toEqual(['Jacket', 'Backpack', 'Hard Drive']);
+
+    fireEvent.change(filter, { target: { value: 'canceled' } });
+    expect(itemTitles()).toEqual(['Backpack']);
+
+    fireEvent.change(filter, { target: { value: 'delivered' } });
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'No delivered orders' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show all orders' }));
+    expect(itemTitles()).toEqual(['Jacket', 'Backpack', 'Hard Drive']);
   });
 });

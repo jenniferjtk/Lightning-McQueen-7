@@ -12,6 +12,13 @@ function readFavorites(userId) {
 
 const formatPrice = (price) => Number(price).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 const formatPoints = (points) => `${Number(points).toLocaleString()} pts`;
+const ORDER_STATUSES = [
+  { value: 'pending', label: 'Pending' },
+  { value: 'shipped', label: 'Shipped' },
+  { value: 'delivered', label: 'Delivered' },
+  { value: 'canceled', label: 'Canceled' },
+];
+const orderStatusLabel = (status) => ORDER_STATUSES.find((entry) => entry.value === status)?.label || status;
 const formatOrderDate = (value) => new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 const hasRequiredAddress = (address) => Boolean(address
   && address.streetAddress?.trim() && address.city?.trim() && address.zipCode?.trim() && address.country?.trim());
@@ -42,6 +49,9 @@ export default function CatalogPage({ sponsors = [], userId, onOrderPlaced, onOr
   const [ordersError, setOrdersError] = useState('');
   const [orderActionError, setOrderActionError] = useState('');
   const [cancellingOrderId, setCancellingOrderId] = useState(null);
+  const [confirmingCancelId, setConfirmingCancelId] = useState(null);
+  const [orderNotice, setOrderNotice] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
   const [confirmingProductId, setConfirmingProductId] = useState(null);
   const [placingOrder, setPlacingOrder] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
@@ -241,9 +251,9 @@ export default function CatalogPage({ sponsors = [], userId, onOrderPlaced, onOr
   };
 
   const cancelOrder = async (order) => {
-    if (!window.confirm(`Cancel order #${order.orderId} for ${order.productTitle}? The points will be returned to your balance.`)) return;
     setCancellingOrderId(order.orderId);
     setOrderActionError('');
+    setOrderNotice('');
     try {
       const response = await fetch(`/api/orders/${order.orderId}/cancel`, {
         method: 'POST',
@@ -259,12 +269,16 @@ export default function CatalogPage({ sponsors = [], userId, onOrderPlaced, onOr
         }
       }
       onOrderCanceled?.(data.order);
+      setConfirmingCancelId(null);
+      setOrderNotice(`Order #${order.orderId} canceled. ${formatPoints(order.pointCost)} returned to your ${order.sponsorName} balance.`);
     } catch (requestError) {
       setOrderActionError(requestError.message);
     } finally {
       setCancellingOrderId(null);
     }
   };
+
+  const visibleOrders = statusFilter ? orders.filter((order) => order.status === statusFilter) : orders;
 
   return (
     <main className="catalog-page">
@@ -585,43 +599,87 @@ export default function CatalogPage({ sponsors = [], userId, onOrderPlaced, onOr
           </div>
         ) : (
           <>
+            <div className="catalog-orders__controls">
+              <label>
+                Show
+                <select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setConfirmingCancelId(null); }}>
+                  <option value="">All orders ({orders.length})</option>
+                  {ORDER_STATUSES.map(({ value, label }) => (
+                    <option key={value} value={value}>
+                      {label} ({orders.filter((order) => order.status === value).length})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {orderNotice && <p className="catalog-address-form__message" role="status">{orderNotice}</p>}
             {orderActionError && <p className="catalog-address-form__error" role="alert">{orderActionError}</p>}
-            <table className="catalog-orders__table">
-              <caption className="visually-hidden">Your orders, newest first</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Order date</th>
-                  <th scope="col">Item</th>
-                  <th scope="col">Sponsor</th>
-                  <th scope="col">Points</th>
-                  <th scope="col">Status</th>
-                  <th scope="col"><span className="visually-hidden">Actions</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {orders.map((order) => (
-                  <tr key={order.orderId}>
-                    <td><time dateTime={order.createdAt}>{formatOrderDate(order.createdAt)}</time></td>
-                    <td>{order.productTitle}</td>
-                    <td>{order.sponsorName}</td>
-                    <td>{formatPoints(order.pointCost)}</td>
-                    <td>{order.status}</td>
-                    <td>
-                      {order.status === 'pending' && (
-                        <button
-                          className="catalog-order-cancel"
-                          type="button"
-                          disabled={cancellingOrderId !== null}
-                          onClick={() => cancelOrder(order)}
-                        >
-                          {cancellingOrderId === order.orderId ? 'Canceling...' : `Cancel order ${order.orderId}`}
-                        </button>
-                      )}
-                    </td>
+            {visibleOrders.length === 0 ? (
+              <div className="catalog-no-results" role="status">
+                <h3>No {orderStatusLabel(statusFilter).toLowerCase()} orders</h3>
+                <p>Choose another status to see the rest of your orders.</p>
+                <button type="button" onClick={() => setStatusFilter('')}>Show all orders</button>
+              </div>
+            ) : (
+              <table className="catalog-orders__table">
+                <caption className="visually-hidden">Your orders, newest first</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Order date</th>
+                    <th scope="col">Item</th>
+                    <th scope="col">Sponsor</th>
+                    <th scope="col">Points</th>
+                    <th scope="col">Status</th>
+                    <th scope="col"><span className="visually-hidden">Actions</span></th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {visibleOrders.map((order) => (
+                    <React.Fragment key={order.orderId}>
+                      <tr>
+                        <td><time dateTime={order.createdAt}>{formatOrderDate(order.createdAt)}</time></td>
+                        <td>{order.productTitle}</td>
+                        <td>{order.sponsorName}</td>
+                        <td>{formatPoints(order.pointCost)}</td>
+                        <td><span className={`catalog-order-status catalog-order-status--${order.status}`}>{orderStatusLabel(order.status)}</span></td>
+                        <td>
+                          {order.status === 'pending' && confirmingCancelId !== order.orderId && (
+                            <button
+                              className="catalog-order-cancel"
+                              type="button"
+                              aria-label={`Cancel order ${order.orderId}`}
+                              disabled={cancellingOrderId !== null}
+                              onClick={() => { setOrderActionError(''); setOrderNotice(''); setConfirmingCancelId(order.orderId); }}
+                            >
+                              Cancel
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                      {confirmingCancelId === order.orderId && (
+                        <tr className="catalog-orders__confirm-row">
+                          <td colSpan={6}>
+                            <div className="catalog-order-confirm" role="dialog" aria-labelledby={`cancel-order-title-${order.orderId}`}>
+                              <p id={`cancel-order-title-${order.orderId}`}>
+                                Cancel order #{order.orderId} for {order.productTitle}? {formatPoints(order.pointCost)} will be returned to your {order.sponsorName} balance.
+                              </p>
+                              <div className="catalog-checkout__actions">
+                                <button type="button" disabled={cancellingOrderId !== null} onClick={() => cancelOrder(order)}>
+                                  {cancellingOrderId === order.orderId ? 'Canceling...' : 'Yes, cancel order'}
+                                </button>
+                                <button type="button" className="catalog-checkout__cancel" disabled={cancellingOrderId !== null} onClick={() => setConfirmingCancelId(null)}>
+                                  Keep order
+                                </button>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </>
         )}
       </section>
