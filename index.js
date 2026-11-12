@@ -602,6 +602,53 @@ app.get('/api/admin/sponsors', requireAdmin, async (req, res) => {
   }
 });
 
+// Creates a sponsor organization (a sponsors row), the company that drivers
+// and sponsor logins are affiliated with. Creating a sponsor *user* does not
+// create one, so without this an admin has nothing new to pick in the
+// affiliation dropdowns.
+app.post('/api/admin/sponsor-organizations', requireAdmin, async (req, res) => {
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim().replace(/\s+/g, ' ') : '';
+  const description = typeof req.body?.description === 'string' ? req.body.description.trim() : '';
+  const rateInput = req.body?.pointConversionRate;
+  const pointConversionRate = rateInput === undefined || rateInput === null || String(rateInput).trim() === ''
+    ? 0.01
+    : parsePointConversionRate(rateInput);
+  if (!name || name.length > 255) {
+    return res.status(400).json({ message: 'Enter an organization name of 255 characters or fewer.' });
+  }
+  if (description.length > 2000) {
+    return res.status(400).json({ message: 'Keep the description to 2000 characters or fewer.' });
+  }
+  if (pointConversionRate === null) {
+    return res.status(400).json({ message: 'Enter a dollar value per point between 0.0001 and 999999.9999.' });
+  }
+  try {
+    const [existing] = await pool.execute(
+      'SELECT sponsor_id FROM sponsors WHERE LOWER(name) = LOWER(?) LIMIT 1',
+      [name],
+    );
+    if (existing[0]) {
+      return res.status(409).json({ message: 'A sponsor organization with that name already exists.' });
+    }
+    const [result] = await pool.execute(
+      'INSERT INTO sponsors (name, description, point_conversion_rate) VALUES (?, ?, ?)',
+      [name, description || null, pointConversionRate],
+    );
+    return res.status(201).json({
+      sponsor: {
+        sponsor_id: result.insertId,
+        name,
+        description: description || null,
+        point_conversion_rate: pointConversionRate,
+      },
+      message: `Sponsor organization ${name} created.`,
+    });
+  } catch (error) {
+    console.error('Sponsor organization creation failed:', error.message);
+    return res.status(500).json({ message: 'Unable to create the sponsor organization.' });
+  }
+});
+
 app.get('/api/admin/sponsor-applications', requireAdmin, async (req, res) => {
   try {
     const [rows] = await pool.execute(

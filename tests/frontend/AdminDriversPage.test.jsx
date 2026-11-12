@@ -121,3 +121,48 @@ it('searches sponsor rows by organization name', async () => {
   expect(sponsorRegion.getByRole('cell', { name: 'Lee Sponsor' })).toBeInTheDocument();
   expect(sponsorRegion.queryByRole('cell', { name: 'Sam Sponsor' })).not.toBeInTheDocument();
 });
+
+it('creates a sponsor organization and offers it in the affiliation dropdowns', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url, options) => {
+    if (url === '/api/admin/sponsor-organizations') {
+      return { ok: true, json: async () => ({ sponsor: { sponsor_id: 12, name: 'Blue Line Freight' }, message: 'Sponsor organization Blue Line Freight created.' }) };
+    }
+    return {
+      ok: true,
+      json: async () => url.endsWith('/drivers')
+        ? { drivers: [{ id: 1, firstName: 'Dana', lastName: 'Driver', email: 'driver@example.com', affiliation: null, sponsorId: null }] }
+        : url.endsWith('/sponsor-links')
+          ? { sponsors: [{ sponsor_id: 10, name: 'Acme Trucking' }], sponsorUsers: [{ user_id: 2, sponsor_id: null }] }
+          : { sponsors: [{ id: 2, firstName: 'Sam', lastName: 'Sponsor', email: 'sponsor@example.com', affiliation: null }] },
+    };
+  }));
+  render(<AdminDriversPage />);
+  const driverSelect = await screen.findByLabelText('Sponsor affiliation for Dana Driver');
+  expect(within(driverSelect).queryByRole('option', { name: 'Blue Line Freight' })).not.toBeInTheDocument();
+
+  const form = within(screen.getByRole('region', { name: 'Create Sponsor Organization' }));
+  fireEvent.change(form.getByLabelText('Organization name'), { target: { value: 'Blue Line Freight' } });
+  fireEvent.change(form.getByLabelText('Dollar value per point'), { target: { value: '0.02' } });
+  fireEvent.click(form.getByRole('button', { name: 'Create Organization' }));
+
+  expect(await screen.findByRole('status')).toHaveTextContent('Sponsor organization Blue Line Freight created.');
+  expect(fetch).toHaveBeenLastCalledWith('/api/admin/sponsor-organizations', expect.objectContaining({
+    method: 'POST', body: JSON.stringify({ name: 'Blue Line Freight', description: '', pointConversionRate: '0.02' }),
+  }));
+  expect(within(driverSelect).getByRole('option', { name: 'Blue Line Freight' })).toBeInTheDocument();
+  expect(within(screen.getByLabelText('Organization for Sam Sponsor')).getByRole('option', { name: 'Blue Line Freight' })).toBeInTheDocument();
+  expect(form.getByLabelText('Organization name')).toHaveValue('');
+});
+
+it('shows the reason an organization could not be created', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url) => (url === '/api/admin/sponsor-organizations'
+    ? { ok: false, json: async () => ({ message: 'A sponsor organization with that name already exists.' }) }
+    : { ok: true, json: async () => (url.endsWith('/drivers') ? { drivers: [] } : url.endsWith('/sponsor-links') ? { sponsors: [], sponsorUsers: [] } : { sponsors: [] }) })));
+  render(<AdminDriversPage />);
+  await screen.findByText('No driver accounts match your search.');
+  const form = within(screen.getByRole('region', { name: 'Create Sponsor Organization' }));
+  fireEvent.change(form.getByLabelText('Organization name'), { target: { value: 'Acme Trucking' } });
+  fireEvent.click(form.getByRole('button', { name: 'Create Organization' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('already exists');
+  expect(form.getByLabelText('Organization name')).toHaveValue('Acme Trucking');
+});
