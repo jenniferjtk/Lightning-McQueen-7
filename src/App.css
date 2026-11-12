@@ -1031,6 +1031,8 @@ body {
 .admin-drivers-page__message--success { background: #e2f1e6; color: #256b42; }
 .admin-driver-create, .admin-driver-list { margin-bottom: 1.25rem; padding: 1.5rem; }
 .admin-driver-form { align-items: end; display: grid; gap: 0.9rem; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; }
+.admin-driver-form--user { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.admin-driver-form__actions { display: flex; flex-wrap: wrap; gap: 0.75rem; grid-column: 1 / -1; }
 .admin-driver-form--organization { grid-template-columns: repeat(3, minmax(0, 1fr)) auto; }
 .admin-organization-create__hint { color: var(--color-slate); font-size: 0.9rem; margin: -0.25rem 0 1rem; }
 .admin-driver-form label, .admin-driver-edit label, .admin-driver-list__search { color: var(--color-slate); display: flex; flex-direction: column; font-size: 0.78rem; font-weight: 700; gap: 0.4rem; }
@@ -1053,8 +1055,11 @@ body {
 .admin-driver-table__role select { min-width: 100px; }
 .admin-driver-table th:first-child, .admin-driver-table td:first-child { padding-left: 0; }
 .admin-driver-table th:last-child, .admin-driver-table td:last-child { padding-right: 0; text-align: right; }
-.admin-driver-table__actions { white-space: nowrap; }
-.admin-driver-table__actions button + button { margin-left: 0.5rem; }
+/* The buttons wrap onto a second line when the row is narrow, so Delete is
+   never pushed out of view past the right edge of the table. */
+.admin-driver-table__actions { min-width: 12rem; }
+.admin-driver-table td:nth-child(2) { min-width: 11rem; overflow-wrap: anywhere; }
+.admin-driver-table__actions button { margin: 0.2rem 0 0.2rem 0.5rem; white-space: nowrap; }
 .admin-driver-button--delete { background: #a2382b !important; }
 .admin-driver-button--delete:hover { background: #7d251c !important; }
 .admin-driver-button--secondary { background: transparent !important; border: 1px solid var(--color-line) !important; color: var(--color-ink) !important; }

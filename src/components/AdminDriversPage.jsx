@@ -456,14 +456,16 @@ export default function AdminDriversPage() {
 
       <section className="admin-driver-create card">
         <h2 className="card__title">Create New User Account</h2>
-        <form className="admin-driver-form" onSubmit={createUser}>
+        <form className="admin-driver-form admin-driver-form--user" onSubmit={createUser}>
           <label>First name<input name="firstName" value={newDriver.firstName} onChange={updateNewDriver} required /></label>
           <label>Last name<input name="lastName" value={newDriver.lastName} onChange={updateNewDriver} required /></label>
           <label>Email address<input type="email" name="email" value={newDriver.email} onChange={updateNewDriver} required /></label>
           <label>Temporary password<input type="password" name="password" value={newDriver.password} onChange={updateNewDriver} minLength="8" autoComplete="new-password" required /></label>
-          <button type="submit" value="driver" disabled={saving}>{saving ? 'Saving...' : 'Create Driver User'}</button>
-          <button type="submit" value="admin" disabled={saving}>{saving ? 'Saving...' : 'Create Admin User'}</button>
-          <button type="submit" value="sponsor" disabled={saving}>{saving ? 'Saving...' : 'Create Sponsor User'}</button>
+          <div className="admin-driver-form__actions">
+            <button type="submit" value="driver" disabled={saving}>{saving ? 'Saving...' : 'Create Driver User'}</button>
+            <button type="submit" value="admin" disabled={saving}>{saving ? 'Saving...' : 'Create Admin User'}</button>
+            <button type="submit" value="sponsor" disabled={saving}>{saving ? 'Saving...' : 'Create Sponsor User'}</button>
+          </div>
         </form>
       </section>
 
