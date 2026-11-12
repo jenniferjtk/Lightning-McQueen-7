@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 
 const EMPTY_DRIVER = { firstName: '', lastName: '', email: '', password: '' };
+const EMPTY_ORGANIZATION = { name: '', description: '', pointConversionRate: '0.01' };
 
 export default function AdminDriversPage() {
   const [drivers, setDrivers] = useState([]);
@@ -19,6 +20,7 @@ export default function AdminDriversPage() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [newDriver, setNewDriver] = useState(EMPTY_DRIVER);
+  const [newOrganization, setNewOrganization] = useState(EMPTY_ORGANIZATION);
   const [editingId, setEditingId] = useState(null);
   const [editDriver, setEditDriver] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -104,6 +106,38 @@ export default function AdminDriversPage() {
   const updateNewDriver = (event) => {
     const { name, value } = event.target;
     setNewDriver((current) => ({ ...current, [name]: value }));
+  };
+
+  const updateNewOrganization = (event) => {
+    const { name, value } = event.target;
+    setNewOrganization((current) => ({ ...current, [name]: value }));
+  };
+
+  // Adds a sponsor company so it can be picked in the driver and sponsor
+  // affiliation dropdowns right away.
+  const createOrganization = async (event) => {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    setNotice('');
+    try {
+      const response = await fetch('/api/admin/sponsor-organizations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(newOrganization),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to create the sponsor organization.');
+      setSponsorOrganizations((current) => [...current, data.sponsor]
+        .sort((a, b) => a.name.localeCompare(b.name)));
+      setNewOrganization(EMPTY_ORGANIZATION);
+      setNotice(data.message || `Sponsor organization ${data.sponsor.name} created.`);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const createUser = async (event) => {
@@ -430,6 +464,20 @@ export default function AdminDriversPage() {
           <button type="submit" value="driver" disabled={saving}>{saving ? 'Saving...' : 'Create Driver User'}</button>
           <button type="submit" value="admin" disabled={saving}>{saving ? 'Saving...' : 'Create Admin User'}</button>
           <button type="submit" value="sponsor" disabled={saving}>{saving ? 'Saving...' : 'Create Sponsor User'}</button>
+        </form>
+      </section>
+
+      <section className="admin-driver-create card" aria-labelledby="organization-create-title">
+        <h2 className="card__title" id="organization-create-title">Create Sponsor Organization</h2>
+        <p className="admin-organization-create__hint">
+          A sponsor organization is the company drivers and sponsor users belong to. After you create one,
+          pick it in the Sponsor affiliation column below.
+        </p>
+        <form className="admin-driver-form admin-driver-form--organization" onSubmit={createOrganization}>
+          <label>Organization name<input name="name" value={newOrganization.name} onChange={updateNewOrganization} maxLength="255" required /></label>
+          <label>Description (optional)<input name="description" value={newOrganization.description} onChange={updateNewOrganization} maxLength="2000" /></label>
+          <label>Dollar value per point<input type="number" name="pointConversionRate" value={newOrganization.pointConversionRate} onChange={updateNewOrganization} min="0.0001" step="0.0001" required /></label>
+          <button type="submit" disabled={saving}>{saving ? 'Saving...' : 'Create Organization'}</button>
         </form>
       </section>
 
