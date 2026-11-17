@@ -71,6 +71,31 @@
                     android:textStyle="bold" />
             </LinearLayout>
 
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/open_orders"
+                    style="@style/Button.Secondary"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1"
+                    android:text="@string/my_orders" />
+
+                <Button
+                    android:id="@+id/open_address"
+                    style="@style/Button.Secondary"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:layout_weight="1"
+                    android:text="@string/shipping_address" />
+            </LinearLayout>
+
             <TextView
                 style="@style/Text.Section"
                 android:layout_width="wrap_content"

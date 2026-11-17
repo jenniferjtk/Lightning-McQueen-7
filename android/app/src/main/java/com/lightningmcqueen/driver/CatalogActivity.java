@@ -1,5 +1,6 @@
 package com.lightningmcqueen.driver;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -199,7 +200,8 @@ public class CatalogActivity extends SignedInActivity {
             dialog.setPositiveButton(R.string.ok, null);
         } else if (shipsTo == null) {
             message.append("\n\n").append(getString(R.string.no_address));
-            dialog.setPositiveButton(R.string.ok, null);
+            dialog.setPositiveButton(R.string.add_address, (d, which) -> startActivity(new Intent(this, AddressActivity.class)))
+                .setNegativeButton(R.string.cancel, null);
         } else {
             dialog.setPositiveButton(R.string.place_order, (d, which) -> placeOrder(product))
                 .setNegativeButton(R.string.cancel, null);
@@ -267,7 +269,9 @@ public class CatalogActivity extends SignedInActivity {
                         break;
                     case "ADDRESS_REQUIRED":
                         shipsTo = null;
-                        dialog.setPositiveButton(R.string.ok, null);
+                        dialog.setPositiveButton(R.string.add_address, (shown, which) ->
+                            startActivity(new Intent(CatalogActivity.this, AddressActivity.class)));
+                        dialog.setNegativeButton(R.string.cancel, null);
                         break;
                     default:
                         dialog.setPositiveButton(R.string.ok, null);

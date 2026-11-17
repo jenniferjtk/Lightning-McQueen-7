@@ -2487,3 +2487,23 @@ body {
 .bulk-upload__result p { margin: 0 0 0.5rem; font-weight: 600; }
 .bulk-upload__result ul { margin: 0; padding-left: 1.2rem; }
 .bulk-upload__result table { margin-top: 0.5rem; }
+
+/* Sponsor "Order for driver" panel (story 25021). */
+.sponsor-catalog__row-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: flex-end; }
+.order-for-driver { margin-bottom: 1.5rem; }
+.order-for-driver__header { align-items: flex-start; display: flex; gap: 1rem; justify-content: space-between; margin-bottom: 1rem; }
+.order-for-driver__header .card__title { margin: 0.2rem 0 0; }
+.order-for-driver__header .card__title:focus { outline: none; }
+.order-for-driver__price { color: var(--color-slate); font-family: var(--font-mono); margin: 0.35rem 0 0; }
+.order-for-driver__close { background: none; border: 1px solid var(--color-line); border-radius: 4px; color: var(--color-asphalt); cursor: pointer; font: inherit; font-weight: 700; min-height: 38px; padding: 0.4rem 0.8rem; }
+.order-for-driver__field { color: var(--color-slate); display: grid; font-size: 0.82rem; font-weight: 700; gap: 0.4rem; max-width: 420px; }
+.order-for-driver__field select { background: #fff; border: 1px solid var(--color-line); border-radius: 4px; color: var(--color-ink); font: inherit; min-height: 42px; padding: 0.45rem 0.6rem; }
+.order-for-driver__summary { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin: 1rem 0 0; }
+.order-for-driver__summary div { background: #f6f7f8; border-radius: 6px; padding: 0.7rem 0.9rem; }
+.order-for-driver__summary dt { color: var(--color-slate); font-size: 0.78rem; font-weight: 700; }
+.order-for-driver__summary dd { color: var(--color-asphalt); font-family: var(--font-mono); font-size: 1.1rem; font-weight: 700; margin: 0.25rem 0 0; }
+.order-for-driver__warning { background: #fff5dc; border-radius: 4px; color: #7a5300; margin: 1rem 0 0; padding: 0.6rem 0.8rem; }
+.order-for-driver__actions { margin-top: 1rem; }
+.order-for-driver__actions button, .order-for-driver__done button { background: var(--color-asphalt); border: 0; border-radius: 4px; color: #fff; cursor: pointer; font: inherit; font-weight: 700; min-height: 42px; padding: 0.6rem 1rem; }
+.order-for-driver__actions button:disabled { cursor: not-allowed; opacity: 0.55; }
+.order-for-driver__done p { margin: 0 0 0.6rem; }

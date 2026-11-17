@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import OrderForDriverPanel from './OrderForDriverPanel.jsx';
 
 async function readJson(response, fallbackMessage) {
   const data = response.status === 204 ? {} : await response.json().catch(() => ({}));
@@ -29,6 +30,7 @@ export default function SponsorCatalogPage({ user }) {
   const [busyProductId, setBusyProductId] = useState(null);
   const [actionMessage, setActionMessage] = useState('');
   const [actionError, setActionError] = useState('');
+  const [orderingProduct, setOrderingProduct] = useState(null);
 
   const loadCatalog = useCallback(() => {
     if (!sponsorId) return Promise.resolve();
@@ -146,6 +148,19 @@ export default function SponsorCatalogPage({ user }) {
           {actionMessage && <p className="sponsor-catalog__notice" role="status">{actionMessage}</p>}
           {actionError && <p className="sponsor-catalog__notice sponsor-catalog__notice--error" role="alert">{actionError}</p>}
 
+          {orderingProduct && (
+            <OrderForDriverPanel
+              key={orderingProduct.productId}
+              product={orderingProduct}
+              onClose={() => setOrderingProduct(null)}
+              onOrdered={({ order, stockQuantity }) => {
+                if (stockQuantity === null || stockQuantity === undefined) return;
+                setCatalog((current) => current.map((item) => (item.productId === order.productId ? { ...item, stockQuantity } : item)));
+                setStockDrafts((current) => ({ ...current, [order.productId]: stockQuantity }));
+              }}
+            />
+          )}
+
           <section className="card driver-management" aria-labelledby="sponsor-catalog-heading">
             <h2 id="sponsor-catalog-heading" className="card__title">Your catalog</h2>
             {catalogLoading ? (
@@ -224,14 +239,25 @@ export default function SponsorCatalogPage({ user }) {
                           </span>
                         </td>
                         <td>
-                          <button
-                            type="button"
-                            className="driver-management__view-application"
-                            disabled={busyProductId === product.productId}
-                            onClick={() => removeProduct(product)}
-                          >
-                            Remove
-                          </button>
+                          <span className="sponsor-catalog__row-actions">
+                            <button
+                              type="button"
+                              className="driver-management__view-application"
+                              aria-label={`Order ${product.title} for a driver`}
+                              disabled={product.stockQuantity === 0}
+                              onClick={() => { setOrderingProduct(product); setActionMessage(''); setActionError(''); }}
+                            >
+                              Order for driver
+                            </button>
+                            <button
+                              type="button"
+                              className="driver-management__view-application"
+                              disabled={busyProductId === product.productId}
+                              onClick={() => removeProduct(product)}
+                            >
+                              Remove
+                            </button>
+                          </span>
                         </td>
                       </tr>
                     ))}

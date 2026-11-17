@@ -79,6 +79,21 @@ describe('POST /api/auth/login', () => {
     });
     expect(res.headers['set-cookie']).toBeDefined();
   });
+
+  it('keeps the session for 30 days only when asked to remember the sign-in', async () => {
+    const cookieLifetimeDays = async (body) => {
+      mockQueries([
+        ['FROM users WHERE email = ?', [users.driver]],
+        ['INSERT INTO audit_events', { insertId: 1 }],
+      ]);
+      const res = await request(app).post('/api/auth/login').send({ email: users.driver.email, password: PASSWORD, ...body }).expect(200);
+      const expires = res.headers['set-cookie'][0].match(/Expires=([^;]+)/)[1];
+      return Math.round((Date.parse(expires) - Date.now()) / 86_400_000);
+    };
+    expect(await cookieLifetimeDays({})).toBe(0);
+    expect(await cookieLifetimeDays({ rememberMe: 'yes' })).toBe(0);
+    expect(await cookieLifetimeDays({ rememberMe: true })).toBe(30);
+  });
 });
 
 describe('sessions', () => {

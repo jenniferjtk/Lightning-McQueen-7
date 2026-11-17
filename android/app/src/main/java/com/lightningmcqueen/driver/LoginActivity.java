@@ -5,6 +5,7 @@ import android.os.Bundle;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.TextView;
 
@@ -22,6 +23,7 @@ public class LoginActivity extends AppCompatActivity {
     private EditText password;
     private TextView error;
     private Button logIn;
+    private CheckBox remember;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -32,9 +34,15 @@ public class LoginActivity extends AppCompatActivity {
         password = findViewById(R.id.password);
         error = findViewById(R.id.error);
         logIn = findViewById(R.id.log_in);
+        remember = findViewById(R.id.remember);
+        remember.setChecked(ApiClient.get().remembersSignIn());
 
         String message = getIntent().getStringExtra(EXTRA_MESSAGE);
-        if (message != null) showError(message);
+        if (message != null) {
+            showError(message);
+        } else if (savedInstanceState == null && ApiClient.get().hasSavedSession()) {
+            resumeSavedSession();
+        }
 
         logIn.setOnClickListener(view -> submit());
         password.setOnEditorActionListener((view, actionId, event) -> {
@@ -42,6 +50,39 @@ public class LoginActivity extends AppCompatActivity {
             submit();
             return true;
         });
+    }
+
+    /** Skips the form when a sign-in saved on an earlier run is still valid (story 29621). */
+    private void resumeSavedSession() {
+        setBusy(true);
+        ApiClient.get().get("/api/auth/me", new ApiClient.Callback() {
+            @Override
+            public void onSuccess(JSONObject response) {
+                if (isFinishing() || isDestroyed()) return;
+                JSONObject user = response.optJSONObject("user");
+                if (user != null && "driver".equals(user.optString("role"))) {
+                    openDashboard();
+                    return;
+                }
+                ApiClient.get().clearSession();
+                setBusy(false);
+            }
+
+            @Override
+            public void onError(ApiError apiError) {
+                if (isFinishing() || isDestroyed()) return;
+                // An expired session just means signing in again; keep the
+                // saved cookie only when the server couldn't be reached.
+                if (apiError.status > 0) ApiClient.get().clearSession();
+                setBusy(false);
+                if (apiError.status <= 0) showError(apiError.message);
+            }
+        });
+    }
+
+    private void openDashboard() {
+        startActivity(new Intent(LoginActivity.this, DashboardActivity.class));
+        finish();
     }
 
     private void submit() {
@@ -53,11 +94,13 @@ public class LoginActivity extends AppCompatActivity {
         }
         error.setVisibility(View.GONE);
         setBusy(true);
+        ApiClient.get().setRememberSignIn(remember.isChecked());
 
         JSONObject body = new JSONObject();
         try {
             body.put("email", emailText);
             body.put("password", passwordText);
+            body.put("rememberMe", remember.isChecked());
         } catch (JSONException impossible) {
             throw new IllegalStateException(impossible);
         }
@@ -75,8 +118,7 @@ public class LoginActivity extends AppCompatActivity {
                     return;
                 }
                 password.setText("");
-                startActivity(new Intent(LoginActivity.this, DashboardActivity.class));
-                finish();
+                openDashboard();
             }
 
             @Override
