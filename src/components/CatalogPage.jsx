@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ORDER_STATUSES, deliveryLabel, formatDeliveryDate, formatOrderDate, formatPoints, formatPrice, orderDateKey, orderStatusLabel } from '../orders.js';
 
 const favoriteStorageKey = (userId) => `driver-catalog-favorites-${userId ?? 'guest'}`;
 
@@ -10,16 +11,6 @@ function readFavorites(userId) {
   }
 }
 
-const formatPrice = (price) => Number(price).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
-const formatPoints = (points) => `${Number(points).toLocaleString()} pts`;
-const ORDER_STATUSES = [
-  { value: 'pending', label: 'Pending' },
-  { value: 'shipped', label: 'Shipped' },
-  { value: 'delivered', label: 'Delivered' },
-  { value: 'canceled', label: 'Canceled' },
-];
-const orderStatusLabel = (status) => ORDER_STATUSES.find((entry) => entry.value === status)?.label || status;
-const formatOrderDate = (value) => new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 const hasRequiredAddress = (address) => Boolean(address
   && address.streetAddress?.trim() && address.city?.trim() && address.zipCode?.trim() && address.country?.trim());
 const addressLine = (address) => [address.streetAddress, address.city, address.state, address.zipCode, address.country]
@@ -52,6 +43,8 @@ export default function CatalogPage({ sponsors = [], userId, onOrderPlaced, onOr
   const [confirmingCancelId, setConfirmingCancelId] = useState(null);
   const [orderNotice, setOrderNotice] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [confirmingProductId, setConfirmingProductId] = useState(null);
   const [placingOrder, setPlacingOrder] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
@@ -278,7 +271,21 @@ export default function CatalogPage({ sponsors = [], userId, onOrderPlaced, onOr
     }
   };
 
-  const visibleOrders = statusFilter ? orders.filter((order) => order.status === statusFilter) : orders;
+  // Date range filter (story 25070). An end date before the start date is
+  // flagged and ignored rather than hiding every order.
+  const dateRangeInvalid = Boolean(fromDate && toDate && fromDate > toDate);
+  const ordersInRange = dateRangeInvalid ? orders : orders.filter((order) => {
+    const day = orderDateKey(order.createdAt);
+    return (!fromDate || day >= fromDate) && (!toDate || day <= toDate);
+  });
+  const visibleOrders = statusFilter ? ordersInRange.filter((order) => order.status === statusFilter) : ordersInRange;
+  const filtersActive = Boolean(statusFilter || fromDate || toDate);
+  const clearOrderFilters = () => {
+    setStatusFilter('');
+    setFromDate('');
+    setToDate('');
+    setConfirmingCancelId(null);
+  };
 
   return (
     <main className="catalog-page">
@@ -410,6 +417,7 @@ export default function CatalogPage({ sponsors = [], userId, onOrderPlaced, onOr
                 <div><dt>Points spent</dt><dd>{formatPoints(placedOrder.pointCost)}</dd></div>
                 <div><dt>New balance</dt><dd>{formatPoints(placedOrder.pointBalance)}</dd></div>
                 <div><dt>Ordered on</dt><dd>{formatOrderDate(placedOrder.createdAt)}</dd></div>
+                {placedOrder.estimatedDelivery && <div><dt>Estimated delivery</dt><dd>{formatDeliveryDate(placedOrder.estimatedDelivery)}</dd></div>}
                 {placedOrder.shipsTo && <div><dt>Ships to</dt><dd>{placedOrder.shipsTo}</dd></div>}
               </dl>
               <button type="button" onClick={() => setPlacedOrder(null)}>Back to catalog</button>
@@ -601,24 +609,38 @@ export default function CatalogPage({ sponsors = [], userId, onOrderPlaced, onOr
           <>
             <div className="catalog-orders__controls">
               <label>
+                From
+                <input type="date" value={fromDate} max={toDate || undefined} onChange={(event) => { setFromDate(event.target.value); setConfirmingCancelId(null); }} />
+              </label>
+              <label>
+                To
+                <input type="date" value={toDate} min={fromDate || undefined} onChange={(event) => { setToDate(event.target.value); setConfirmingCancelId(null); }} />
+              </label>
+              <label>
                 Show
                 <select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setConfirmingCancelId(null); }}>
-                  <option value="">All orders ({orders.length})</option>
+                  <option value="">All orders ({ordersInRange.length})</option>
                   {ORDER_STATUSES.map(({ value, label }) => (
                     <option key={value} value={value}>
-                      {label} ({orders.filter((order) => order.status === value).length})
+                      {label} ({ordersInRange.filter((order) => order.status === value).length})
                     </option>
                   ))}
                 </select>
               </label>
+              {filtersActive && (
+                <button type="button" className="catalog-orders__clear" onClick={clearOrderFilters}>Clear filters</button>
+              )}
             </div>
+            {dateRangeInvalid && (
+              <p className="catalog-address-form__error" role="alert">The end date is before the start date, so the date range isn't applied.</p>
+            )}
             {orderNotice && <p className="catalog-address-form__message" role="status">{orderNotice}</p>}
             {orderActionError && <p className="catalog-address-form__error" role="alert">{orderActionError}</p>}
             {visibleOrders.length === 0 ? (
               <div className="catalog-no-results" role="status">
-                <h3>No {orderStatusLabel(statusFilter).toLowerCase()} orders</h3>
-                <p>Choose another status to see the rest of your orders.</p>
-                <button type="button" onClick={() => setStatusFilter('')}>Show all orders</button>
+                <h3>{statusFilter ? `No ${orderStatusLabel(statusFilter).toLowerCase()} orders` : 'No orders'}{fromDate || toDate ? ' in this date range' : ''}</h3>
+                <p>Change the filters to see the rest of your orders.</p>
+                <button type="button" onClick={clearOrderFilters}>Show all orders</button>
               </div>
             ) : (
               <table className="catalog-orders__table">
@@ -630,6 +652,7 @@ export default function CatalogPage({ sponsors = [], userId, onOrderPlaced, onOr
                     <th scope="col">Sponsor</th>
                     <th scope="col">Points</th>
                     <th scope="col">Status</th>
+                    <th scope="col">Delivery</th>
                     <th scope="col"><span className="visually-hidden">Actions</span></th>
                   </tr>
                 </thead>
@@ -642,6 +665,7 @@ export default function CatalogPage({ sponsors = [], userId, onOrderPlaced, onOr
                         <td>{order.sponsorName}</td>
                         <td>{formatPoints(order.pointCost)}</td>
                         <td><span className={`catalog-order-status catalog-order-status--${order.status}`}>{orderStatusLabel(order.status)}</span></td>
+                        <td className="catalog-orders__delivery">{deliveryLabel(order)}</td>
                         <td>
                           {order.status === 'pending' && confirmingCancelId !== order.orderId && (
                             <button
@@ -658,7 +682,7 @@ export default function CatalogPage({ sponsors = [], userId, onOrderPlaced, onOr
                       </tr>
                       {confirmingCancelId === order.orderId && (
                         <tr className="catalog-orders__confirm-row">
-                          <td colSpan={6}>
+                          <td colSpan={7}>
                             <div className="catalog-order-confirm" role="dialog" aria-labelledby={`cancel-order-title-${order.orderId}`}>
                               <p id={`cancel-order-title-${order.orderId}`}>
                                 Cancel order #{order.orderId} for {order.productTitle}? {formatPoints(order.pointCost)} will be returned to your {order.sponsorName} balance.
