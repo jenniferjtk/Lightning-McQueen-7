@@ -45,8 +45,12 @@ const byId = (id) => Object.values(users).filter((user) => user.user_id === Numb
 // Returns a Supertest agent holding a session cookie for the given user.
 export async function signIn(app, user) {
   const agent = request.agent(app);
-  mockQueries([['FROM users WHERE email = ?', [user]]]);
+  mockQueries([
+    ['FROM users WHERE email = ?', [user]],
+    ['INSERT INTO audit_events', { insertId: 1 }],
+  ]);
   await agent.post('/api/auth/login').send({ email: user.email, password: PASSWORD }).expect(200);
+  db.execute.mockClear();
   return agent;
 }
 

@@ -98,6 +98,23 @@ const newUserError = ({ email, password, firstName, lastName, role }, allowedRol
 
 const hashPassword = (password) => bcrypt.hash(password, 12);
 
+const refreshAccountStatus = async (userId) => {
+  await pool.execute(
+    `UPDATE users
+       SET account_status = 'active', suspended_until = NULL
+     WHERE user_id = ?
+       AND account_status = 'suspended'
+       AND suspended_until IS NOT NULL
+       AND suspended_until <= NOW()`,
+    [userId],
+  );
+  const [rows] = await pool.execute(
+    'SELECT user_id, role, sponsor_id, account_status, suspended_until FROM users WHERE user_id = ?',
+    [userId],
+  );
+  return rows[0] || null;
+};
+
 const requireRuleManager = async (req, res, next) => {
   if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
   try {
@@ -253,13 +270,27 @@ app.post('/api/auth/login', async (req, res) => {
   if (!email || !password) return res.status(400).json({ message: 'Email and password are required.' });
 
   try {
-    const [rows] = await pool.execute('SELECT * FROM users WHERE email = ?', [email.trim().toLowerCase()]);
+    const username = email.trim().toLowerCase();
+    const [rows] = await pool.execute('SELECT * FROM users WHERE email = ?', [username]);
     const user = rows[0];
-    if (!user || !(await bcrypt.compare(password, user.password_hash))) {
+    const succeeded = Boolean(user && await bcrypt.compare(password, user.password_hash));
+    await pool.execute(
+      `INSERT INTO audit_events (category, affected_user_id, username, success)
+       VALUES ('login_attempt', ?, ?, ?)`,
+      [user?.user_id ?? null, username, succeeded],
+    );
+    if (!succeeded) {
       return res.status(401).json({ message: 'Invalid email or password.' });
     }
+
+    const accountTrackingEnabled = Object.prototype.hasOwnProperty.call(user, 'account_status') || Object.prototype.hasOwnProperty.call(user, 'suspended_until');
+    const refreshedUser = accountTrackingEnabled ? await refreshAccountStatus(user.user_id) : user;
+    if (refreshedUser?.account_status === 'suspended' && refreshedUser.suspended_until && new Date(refreshedUser.suspended_until).getTime() > Date.now()) {
+      return res.status(403).json({ message: `This account is suspended until ${new Date(refreshedUser.suspended_until).toLocaleString()}.` });
+    }
+
     req.session.userId = user.user_id;
-    return res.json({ user: publicUser(user) });
+    return res.json({ user: publicUser(refreshedUser || user) });
   } catch (error) {
     console.error('Login failed:', error.message);
     return res.status(500).json({ message: 'Unable to sign you in.' });
@@ -285,7 +316,22 @@ app.post('/api/auth/change-password', async (req, res) => {
     }
 
     const passwordHash = await bcrypt.hash(newPassword, 12);
-    await pool.execute('UPDATE users SET password_hash = ? WHERE user_id = ?', [passwordHash, req.session.userId]);
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.execute('UPDATE users SET password_hash = ? WHERE user_id = ?', [passwordHash, req.session.userId]);
+      await connection.execute(
+        `INSERT INTO audit_events (category, affected_user_id, change_type)
+         VALUES ('password_change', ?, 'self-service')`,
+        [req.session.userId],
+      );
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
     return res.json({ message: 'Password updated successfully.' });
   } catch (error) {
     console.error('Password change failed:', error.message);
@@ -342,6 +388,49 @@ app.get('/api/admin/drivers', requireAdmin, async (req, res) => {
   } catch (error) {
     console.error('Driver list failed:', error.message);
     return res.status(500).json({ message: 'Unable to load driver accounts.' });
+  }
+});
+
+// Export is kept server-side so it is both admin-protected and independent of
+// the filters currently applied in the user-management screen.
+app.get('/api/admin/drivers.csv', requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT u.user_id, u.email, u.first_name, u.last_name, u.created_at,
+              GROUP_CONCAT(DISTINCT s.name ORDER BY s.name SEPARATOR ', ') AS affiliation
+       FROM users u
+       LEFT JOIN driver_applications a ON a.driver_user_id = u.user_id AND a.status = 'approved'
+       LEFT JOIN sponsors s ON s.sponsor_id = a.sponsor_id
+       WHERE u.role = 'driver'
+       GROUP BY u.user_id, u.email, u.first_name, u.last_name, u.created_at
+       ORDER BY u.created_at DESC, u.user_id DESC`,
+    );
+    const csvValue = (value) => {
+      const text = String(value ?? '');
+      // Prevent spreadsheet applications from interpreting user-entered data as a formula.
+      const safeText = /^[=+\-@]/.test(text) ? `'${text}` : text;
+      return `"${safeText.replace(/"/g, '""')}"`;
+    };
+    const csv = [
+      ['Driver ID', 'First name', 'Last name', 'Email', 'Sponsor affiliation', 'Joined'],
+      ...rows.map((driver) => [
+        driver.user_id,
+        driver.first_name,
+        driver.last_name,
+        driver.email,
+        driver.affiliation,
+        driver.created_at,
+      ]),
+    ].map((row) => row.map(csvValue).join(',')).join('\r\n');
+
+    res.set({
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="drivers.csv"',
+    });
+    return res.send(`\uFEFF${csv}`);
+  } catch (error) {
+    console.error('Driver CSV export failed:', error.message);
+    return res.status(500).json({ message: 'Unable to export driver accounts.' });
   }
 });
 
@@ -556,6 +645,53 @@ app.get('/api/admin/sponsors', requireAdmin, async (req, res) => {
   }
 });
 
+// Creates a sponsor organization (a sponsors row), the company that drivers
+// and sponsor logins are affiliated with. Creating a sponsor *user* does not
+// create one, so without this an admin has nothing new to pick in the
+// affiliation dropdowns.
+app.post('/api/admin/sponsor-organizations', requireAdmin, async (req, res) => {
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim().replace(/\s+/g, ' ') : '';
+  const description = typeof req.body?.description === 'string' ? req.body.description.trim() : '';
+  const rateInput = req.body?.pointConversionRate;
+  const pointConversionRate = rateInput === undefined || rateInput === null || String(rateInput).trim() === ''
+    ? 0.01
+    : parsePointConversionRate(rateInput);
+  if (!name || name.length > 255) {
+    return res.status(400).json({ message: 'Enter an organization name of 255 characters or fewer.' });
+  }
+  if (description.length > 2000) {
+    return res.status(400).json({ message: 'Keep the description to 2000 characters or fewer.' });
+  }
+  if (pointConversionRate === null) {
+    return res.status(400).json({ message: 'Enter a dollar value per point between 0.0001 and 999999.9999.' });
+  }
+  try {
+    const [existing] = await pool.execute(
+      'SELECT sponsor_id FROM sponsors WHERE LOWER(name) = LOWER(?) LIMIT 1',
+      [name],
+    );
+    if (existing[0]) {
+      return res.status(409).json({ message: 'A sponsor organization with that name already exists.' });
+    }
+    const [result] = await pool.execute(
+      'INSERT INTO sponsors (name, description, point_conversion_rate) VALUES (?, ?, ?)',
+      [name, description || null, pointConversionRate],
+    );
+    return res.status(201).json({
+      sponsor: {
+        sponsor_id: result.insertId,
+        name,
+        description: description || null,
+        point_conversion_rate: pointConversionRate,
+      },
+      message: `Sponsor organization ${name} created.`,
+    });
+  } catch (error) {
+    console.error('Sponsor organization creation failed:', error.message);
+    return res.status(500).json({ message: 'Unable to create the sponsor organization.' });
+  }
+});
+
 app.get('/api/admin/sponsor-applications', requireAdmin, async (req, res) => {
   try {
     const [rows] = await pool.execute(
@@ -677,11 +813,29 @@ app.put('/api/admin/drivers/:driverId/password', requireAdmin, async (req, res) 
   }
   try {
     const passwordHash = await bcrypt.hash(password, 12);
-    const [result] = await pool.execute(
-      "UPDATE users SET password_hash = ? WHERE user_id = ? AND role = 'driver'",
-      [passwordHash, driverId],
-    );
-    if (!result.affectedRows) return res.status(404).json({ message: 'Driver account not found.' });
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [result] = await connection.execute(
+        "UPDATE users SET password_hash = ? WHERE user_id = ? AND role = 'driver'",
+        [passwordHash, driverId],
+      );
+      if (!result.affectedRows) {
+        await connection.rollback();
+        return res.status(404).json({ message: 'Driver account not found.' });
+      }
+      await connection.execute(
+        `INSERT INTO audit_events (category, actor_user_id, affected_user_id, change_type)
+         VALUES ('password_change', ?, ?, 'admin-reset')`,
+        [req.session.userId, driverId],
+      );
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
     return res.json({ message: 'Driver password reset.' });
   } catch (error) {
     console.error('Driver password reset failed:', error.message);
@@ -797,7 +951,9 @@ app.get('/api/sponsor/drivers', async (req, res) => {
 
     const [drivers] = await pool.execute(
       `SELECT u.user_id AS id, u.first_name AS firstName, u.last_name AS lastName,
-              u.email, u.created_at AS createdAt, COALESCE(points.total, 0) - COALESCE(spent.total, 0) AS points,
+              u.email, u.created_at AS createdAt, u.account_status AS account_status,
+              u.suspended_until AS suspended_until,
+              COALESCE(points.total, 0) - COALESCE(spent.total, 0) AS points,
               a.application_id AS applicationId, a.status, a.submitted_at AS submittedAt,
               a.decided_at AS decidedAt, s.name AS sponsorName
        FROM driver_applications a
@@ -821,11 +977,63 @@ app.get('/api/sponsor/drivers', async (req, res) => {
     );
     return res.json({
       sponsorLinked: true,
-      drivers: drivers.map((driver) => ({ ...driver, points: Number(driver.points) })),
+      drivers: drivers.map((driver) => ({
+        ...driver,
+        points: Number(driver.points),
+        account_status: driver.account_status || 'active',
+        suspended_until: driver.suspended_until || null,
+      })),
     });
   } catch (error) {
     console.error('Sponsor driver list failed:', error.message);
     return res.status(500).json({ message: 'Unable to load sponsor drivers.' });
+  }
+});
+
+app.post('/api/sponsor/drivers/:driverUserId/suspend', requireRole('sponsor'), async (req, res) => {
+  const driverUserId = Number(req.params.driverUserId);
+  const durationHours = Number(req.body?.durationHours);
+
+  if (!Number.isSafeInteger(driverUserId) || driverUserId < 1) {
+    return res.status(400).json({ message: 'Choose a valid driver.' });
+  }
+  if (!Number.isFinite(durationHours) || durationHours < 0 || durationHours > 8760) {
+    return res.status(400).json({ message: 'Suspend the driver for between 1 hour and 365 days.' });
+  }
+
+  try {
+    const [approved] = await pool.execute(
+      "SELECT application_id FROM driver_applications WHERE driver_user_id = ? AND sponsor_id = ? AND status = 'approved'",
+      [driverUserId, req.currentUser.sponsor_id],
+    );
+    if (!approved[0]) return res.status(403).json({ message: 'This driver is not in your sponsor program.' });
+
+    if (durationHours === 0) {
+      const [result] = await pool.execute(
+        "UPDATE users SET account_status = 'active', suspended_until = NULL WHERE user_id = ? AND role = 'driver'",
+        [driverUserId],
+      );
+      if (!result.affectedRows) return res.status(404).json({ message: 'Driver account not found.' });
+      return res.json({ suspended: false, message: 'Driver account re-enabled.' });
+    }
+
+    const [result] = await pool.execute(
+      `UPDATE users
+         SET account_status = 'suspended', suspended_until = DATE_ADD(NOW(), INTERVAL ? HOUR)
+       WHERE user_id = ? AND role = 'driver'`,
+      [durationHours, driverUserId],
+    );
+    if (!result.affectedRows) return res.status(404).json({ message: 'Driver account not found.' });
+
+    const suspendedUntil = new Date(Date.now() + durationHours * 60 * 60 * 1000).toISOString();
+    return res.json({
+      suspended: true,
+      suspendedUntil,
+      message: `Driver account suspended until ${new Date(suspendedUntil).toLocaleString()}.`,
+    });
+  } catch (error) {
+    console.error('Driver suspension failed:', error.message);
+    return res.status(500).json({ message: 'Unable to update the driver account status.' });
   }
 });
 
@@ -939,22 +1147,36 @@ app.delete('/api/sponsor-rules/:ruleId', requireRuleManager, async (req, res) =>
 // Loads the signed-in user onto req.currentUser and rejects anyone whose role
 // isn't listed. Application routes take the driver/sponsor identity from here,
 // never from the request body or query string.
-const requireRole = (...roles) => async (req, res, next) => {
-  if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
-  try {
-    const [rows] = await pool.execute('SELECT user_id, role, sponsor_id FROM users WHERE user_id = ?', [req.session.userId]);
-    if (!rows[0]) return res.status(401).json({ message: 'Session expired.' });
-    if (!roles.includes(rows[0].role)) return res.status(403).json({ message: 'You do not have access to this action.' });
-    if (rows[0].role === 'sponsor' && !rows[0].sponsor_id) {
-      return res.status(403).json({ message: 'Your account is not linked to a sponsor organization.' });
+function requireRole(...roles) {
+  return async (req, res, next) => {
+    if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
+    try {
+      const [rows] = await pool.execute(
+        'SELECT user_id, role, sponsor_id, account_status, suspended_until FROM users WHERE user_id = ?',
+        [req.session.userId],
+      );
+      if (!rows[0]) return res.status(401).json({ message: 'Session expired.' });
+
+      const accountTrackingEnabled = Object.prototype.hasOwnProperty.call(rows[0], 'account_status') || Object.prototype.hasOwnProperty.call(rows[0], 'suspended_until');
+      const user = accountTrackingEnabled ? await refreshAccountStatus(rows[0].user_id) : rows[0];
+      if (user?.account_status === 'suspended' && user.suspended_until && new Date(user.suspended_until).getTime() > Date.now()) {
+        return res.status(403).json({ message: `This account is suspended until ${new Date(user.suspended_until).toLocaleString()}.` });
+      }
+
+      if (!roles.includes(user?.role ?? rows[0].role)) {
+        return res.status(403).json({ message: 'You do not have access to this action.' });
+      }
+      if ((user?.role ?? rows[0].role) === 'sponsor' && !(user?.sponsor_id ?? rows[0].sponsor_id)) {
+        return res.status(403).json({ message: 'Your account is not linked to a sponsor organization.' });
+      }
+      req.currentUser = user || rows[0];
+      return next();
+    } catch (error) {
+      console.error('Role authorization failed:', error.message);
+      return res.status(500).json({ message: 'Unable to authorize this request.' });
     }
-    req.currentUser = rows[0];
-    return next();
-  } catch (error) {
-    console.error('Role authorization failed:', error.message);
-    return res.status(500).json({ message: 'Unable to authorize this request.' });
-  }
-};
+  };
+}
 
 const APPLICATION_STATUSES = ['pending', 'approved', 'rejected', 'withdrawn'];
 
@@ -1069,7 +1291,7 @@ app.patch('/api/applications/:applicationId/decide', requireRole('sponsor'), asy
 
   try {
     const [rows] = await pool.execute(
-      'SELECT driver_user_id, sponsor_id, status FROM driver_applications WHERE application_id = ?',
+      'SELECT sponsor_id, driver_user_id, status FROM driver_applications WHERE application_id = ?',
       [req.params.applicationId],
     );
     if (!rows[0]) return res.status(404).json({ message: 'No application found with that id.' });
@@ -1365,6 +1587,215 @@ app.get('/api/sponsor/points/transactions', requireRole('sponsor'), async (req, 
   }
 });
 
+app.get('/api/admin/reports/sales/options', requireAdmin, async (req, res) => {
+  const { sponsorId = 'all' } = req.query;
+  const parsedSponsorId = typeof sponsorId === 'string' && /^\d+$/.test(sponsorId) ? Number(sponsorId) : null;
+  if (sponsorId !== 'all' && (!Number.isSafeInteger(parsedSponsorId) || parsedSponsorId < 1)) {
+    return res.status(400).json({ message: 'Choose a valid sponsor.' });
+  }
+
+  try {
+    const [sponsors] = await pool.execute(
+      'SELECT sponsor_id AS id, name FROM sponsors ORDER BY name, sponsor_id',
+    );
+    let drivers = [];
+    if (sponsorId !== 'all') {
+      const [rows] = await pool.execute(
+        `SELECT DISTINCT u.user_id AS id, CONCAT(u.first_name, ' ', u.last_name) AS name
+         FROM driver_applications a
+         JOIN users u ON u.user_id = a.driver_user_id
+         WHERE a.sponsor_id = ? AND a.status = 'approved' AND u.role = 'driver'
+         ORDER BY u.last_name, u.first_name, u.user_id`,
+        [parsedSponsorId],
+      );
+      drivers = rows;
+    }
+    return res.json({ sponsors, drivers });
+  } catch (error) {
+    console.error('Sales report filter lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load sales report filters.' });
+  }
+});
+
+app.get('/api/admin/reports/sales', requireAdmin, async (req, res) => {
+  const {
+    startDate,
+    endDate,
+    reportType = 'sponsor',
+    sponsorId = 'all',
+    driverId = 'all',
+    view = 'summary',
+  } = req.query;
+  const isValidDate = (value) => {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const date = new Date(`${value}T00:00:00Z`);
+    return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+  };
+  if (!isValidDate(startDate) || !isValidDate(endDate) || startDate > endDate) {
+    return res.status(400).json({ message: 'Choose a valid date range.' });
+  }
+  if (!['sponsor', 'driver'].includes(reportType) || !['summary', 'detailed'].includes(view)) {
+    return res.status(400).json({ message: 'Choose a valid report and view.' });
+  }
+  const parsedSponsorId = typeof sponsorId === 'string' && /^\d+$/.test(sponsorId) ? Number(sponsorId) : null;
+  if (sponsorId !== 'all' && (!Number.isSafeInteger(parsedSponsorId) || parsedSponsorId < 1)) {
+    return res.status(400).json({ message: 'Choose a valid sponsor.' });
+  }
+  const parsedDriverId = typeof driverId === 'string' && /^\d+$/.test(driverId) ? Number(driverId) : null;
+  const driverFilterActive = reportType === 'driver' && sponsorId !== 'all' && driverId !== 'all';
+  if (driverFilterActive && (!Number.isSafeInteger(parsedDriverId) || parsedDriverId < 1)) {
+    return res.status(400).json({ message: 'Choose a valid driver.' });
+  }
+
+  const conditions = [
+    'o.created_at >= ?',
+    'o.created_at < DATE_ADD(?, INTERVAL 1 DAY)',
+    "o.status <> 'canceled'",
+  ];
+  const params = [startDate, endDate];
+  if (sponsorId !== 'all') {
+    conditions.push('o.sponsor_id = ?');
+    params.push(parsedSponsorId);
+  }
+  if (driverFilterActive) {
+    conditions.push('o.driver_user_id = ?');
+    params.push(parsedDriverId);
+  }
+
+  const where = conditions.join(' AND ');
+  let query;
+  if (view === 'detailed') {
+    query = `SELECT o.order_id AS orderId,
+                    DATE_FORMAT(o.created_at, '%Y-%m-%d') AS saleDate,
+                    u.user_id AS driverId,
+                    CONCAT(u.first_name, ' ', u.last_name) AS driverName,
+                    s.sponsor_id AS sponsorId,
+                    s.name AS sponsorName,
+                    o.product_title AS productTitle,
+                    o.unit_price AS amount,
+                    o.point_cost AS pointCost,
+                    o.status
+             FROM orders o
+             JOIN users u ON u.user_id = o.driver_user_id
+             JOIN sponsors s ON s.sponsor_id = o.sponsor_id
+             WHERE ${where}
+             ORDER BY o.created_at DESC, o.order_id DESC`;
+  } else if (reportType === 'sponsor') {
+    query = `SELECT s.sponsor_id AS sponsorId,
+                    s.name AS sponsorName,
+                    COUNT(*) AS orderCount,
+                    SUM(o.unit_price) AS salesTotal,
+                    SUM(o.point_cost) AS pointsRedeemed
+             FROM orders o
+             JOIN sponsors s ON s.sponsor_id = o.sponsor_id
+             WHERE ${where}
+             GROUP BY s.sponsor_id, s.name
+             ORDER BY salesTotal DESC, s.name`;
+  } else {
+    query = `SELECT u.user_id AS driverId,
+                    CONCAT(u.first_name, ' ', u.last_name) AS driverName,
+                    GROUP_CONCAT(DISTINCT s.name ORDER BY s.name SEPARATOR ', ') AS sponsorName,
+                    COUNT(*) AS orderCount,
+                    SUM(o.unit_price) AS salesTotal,
+                    SUM(o.point_cost) AS pointsRedeemed
+             FROM orders o
+             JOIN users u ON u.user_id = o.driver_user_id
+             JOIN sponsors s ON s.sponsor_id = o.sponsor_id
+             WHERE ${where}
+             GROUP BY u.user_id, u.first_name, u.last_name
+             ORDER BY salesTotal DESC, u.last_name, u.first_name`;
+  }
+
+  try {
+    const [rows] = await pool.execute(query, params);
+    return res.json({
+      entries: rows.map((row) => ({
+        ...row,
+        ...(row.orderId !== undefined ? { orderId: Number(row.orderId) } : {}),
+        ...(row.driverId !== undefined ? { driverId: Number(row.driverId) } : {}),
+        ...(row.sponsorId !== undefined ? { sponsorId: Number(row.sponsorId) } : {}),
+        ...(row.orderCount !== undefined ? { orderCount: Number(row.orderCount) } : {}),
+        ...(row.amount !== undefined ? { amount: Number(row.amount) } : {}),
+        ...(row.pointCost !== undefined ? { pointCost: Number(row.pointCost) } : {}),
+        ...(row.salesTotal !== undefined ? { salesTotal: Number(row.salesTotal) } : {}),
+        ...(row.pointsRedeemed !== undefined ? { pointsRedeemed: Number(row.pointsRedeemed) } : {}),
+      })),
+    });
+  } catch (error) {
+    console.error('Sales report lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load the sales report.' });
+  }
+});
+
+const isCalendarDate = (value) => {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+};
+
+// What each sponsor owes for its drivers' purchases in a date range (story
+// 21122): every order that wasn't canceled, grouped by the sponsor whose
+// catalog it came from. The amount due is the dollar price copied onto each
+// order at checkout. Totals are summed in cents so they don't drift.
+app.get('/api/admin/reports/sponsor-billing', requireAdmin, async (req, res) => {
+  const { startDate, endDate } = req.query;
+  if (!isCalendarDate(startDate) || !isCalendarDate(endDate) || startDate > endDate) {
+    return res.status(400).json({ message: 'Choose a valid date range.' });
+  }
+  try {
+    const [rows] = await pool.execute(
+      `SELECT o.order_id, o.created_at, o.status, o.sponsor_id, s.name AS sponsor_name,
+              o.product_title, o.unit_price, o.point_cost,
+              d.first_name AS driver_first_name, d.last_name AS driver_last_name, d.email AS driver_email
+       FROM orders o
+       JOIN sponsors s ON s.sponsor_id = o.sponsor_id
+       JOIN users d ON d.user_id = o.driver_user_id
+       WHERE o.status <> 'canceled'
+         AND o.created_at >= ? AND o.created_at < DATE_ADD(?, INTERVAL 1 DAY)
+       ORDER BY s.name, o.created_at DESC, o.order_id DESC`,
+      [startDate, endDate],
+    );
+
+    const purchases = rows.map((row) => ({
+      orderId: Number(row.order_id),
+      createdAt: row.created_at,
+      status: row.status,
+      sponsorId: Number(row.sponsor_id),
+      sponsorName: row.sponsor_name,
+      driverName: `${row.driver_first_name || ''} ${row.driver_last_name || ''}`.trim() || row.driver_email,
+      productTitle: row.product_title,
+      unitPrice: Number(row.unit_price),
+      pointCost: Number(row.point_cost),
+    }));
+
+    const bySponsor = new Map();
+    for (const purchase of purchases) {
+      const entry = bySponsor.get(purchase.sponsorId) || {
+        sponsorId: purchase.sponsorId, sponsorName: purchase.sponsorName, orderCount: 0, pointsRedeemed: 0, cents: 0,
+      };
+      entry.orderCount += 1;
+      entry.pointsRedeemed += purchase.pointCost;
+      entry.cents += Math.round(purchase.unitPrice * 100);
+      bySponsor.set(purchase.sponsorId, entry);
+    }
+    const sponsors = [...bySponsor.values()].map(({ cents, ...entry }) => ({ ...entry, amountDue: cents / 100 }));
+    const totalCents = sponsors.reduce((sum, entry) => sum + Math.round(entry.amountDue * 100), 0);
+
+    return res.json({
+      sponsors,
+      purchases,
+      totals: {
+        orderCount: purchases.length,
+        pointsRedeemed: sponsors.reduce((sum, entry) => sum + entry.pointsRedeemed, 0),
+        amountDue: totalCents / 100,
+      },
+    });
+  } catch (error) {
+    console.error('Sponsor billing report failed:', error.message);
+    return res.status(500).json({ message: 'Unable to build the sponsor billing report.' });
+  }
+});
+
 app.get('/api/reports/sponsor-points', requireRole('admin', 'sponsor'), async (req, res) => {
   const { startDate, endDate, driverId = 'all' } = req.query;
   const isValidDate = (value) => {
@@ -1428,6 +1859,100 @@ app.get('/api/reports/sponsor-points', requireRole('admin', 'sponsor'), async (r
   } catch (error) {
     console.error('Sponsor point report lookup failed:', error.message);
     return res.status(500).json({ message: 'Unable to load the sponsor point report.' });
+  }
+});
+
+app.get('/api/reports/audit-log', requireRole('admin', 'sponsor'), async (req, res) => {
+  const { startDate, endDate, category } = req.query;
+  const isValidDate = (value) => {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const date = new Date(`${value}T00:00:00Z`);
+    return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+  };
+  const categories = ['driver_application', 'point_change', 'password_change', 'login_attempt'];
+  if (!isValidDate(startDate) || !isValidDate(endDate) || startDate > endDate) {
+    return res.status(400).json({ message: 'Choose a valid date range.' });
+  }
+  if (!categories.includes(category)) {
+    return res.status(400).json({ message: 'Choose a valid audit log category.' });
+  }
+
+  const params = [startDate, endDate, category];
+  const sponsorCondition = req.currentUser.role === 'sponsor'
+    ? `AND (
+         (events.category = 'driver_application' AND events.sponsor_id = ?)
+         OR (events.category = 'point_change' AND events.sponsor_id = ? AND EXISTS (
+           SELECT 1 FROM driver_applications a
+           WHERE a.driver_user_id = events.driver_id
+             AND a.sponsor_id = ? AND a.status = 'approved'
+         ))
+         OR (events.category IN ('password_change', 'login_attempt') AND EXISTS (
+           SELECT 1 FROM driver_applications a
+           WHERE a.driver_user_id = events.driver_id
+             AND a.sponsor_id = ? AND a.status = 'approved'
+         ))
+       )`
+    : '';
+  if (req.currentUser.role === 'sponsor') {
+    params.push(
+      req.currentUser.sponsor_id,
+      req.currentUser.sponsor_id,
+      req.currentUser.sponsor_id,
+      req.currentUser.sponsor_id,
+    );
+  }
+
+  try {
+    const [rows] = await pool.execute(
+      `SELECT events.category, DATE_FORMAT(events.occurred_at, '%Y-%m-%d %H:%i:%s') AS date,
+              sponsors.name AS sponsorName,
+              events.sponsorUserName,
+              CONCAT(driver.first_name, ' ', driver.last_name) AS driverName,
+              events.driver_id AS driverId, events.status, events.points, events.reason,
+              events.username, events.change_type AS changeType, events.success
+       FROM (
+         SELECT 'driver_application' AS category, a.decided_at AS occurred_at, a.sponsor_id,
+                NULL AS sponsorUserName, a.driver_user_id AS driver_id, a.status,
+                NULL AS points, NULL AS reason,
+                NULL AS username, NULL AS change_type, NULL AS success
+         FROM driver_applications a
+         WHERE a.status IN ('approved', 'rejected') AND a.decided_at IS NOT NULL
+         UNION ALL
+         SELECT e.category, e.occurred_at, e.sponsor_id, NULL AS sponsorUserName,
+                e.affected_user_id AS driver_id, e.status, NULL AS points, e.reason,
+                e.username, e.change_type, e.success
+         FROM audit_events e
+         WHERE e.category IN ('password_change', 'login_attempt')
+         UNION ALL
+         SELECT 'point_change' AS category, l.timestamp AS occurred_at, r.sponsor_id,
+                CONCAT(actor.first_name, ' ', actor.last_name) AS sponsorUserName,
+                l.affected_user_id AS driver_id, NULL AS status, r.pt_value AS points,
+                COALESCE(NULLIF(l.comment, ''), NULLIF(r.description, ''), 'Unspecified') AS reason,
+                NULL AS username, NULL AS change_type, NULL AS success
+         FROM point_audit_log l
+         JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+         JOIN users actor ON actor.user_id = l.actor_id
+       ) events
+       JOIN users driver ON driver.user_id = events.driver_id AND driver.role = 'driver'
+       LEFT JOIN sponsors ON sponsors.sponsor_id = events.sponsor_id
+       WHERE events.occurred_at >= ?
+         AND events.occurred_at < DATE_ADD(?, INTERVAL 1 DAY)
+         AND events.category = ?
+         ${sponsorCondition}
+       ORDER BY events.occurred_at DESC`,
+      [params[0], params[1], params[2], ...params.slice(3)],
+    );
+    return res.json({
+      entries: rows.map((row) => ({
+        ...row,
+        driverId: Number(row.driverId),
+        points: row.points === null ? null : Number(row.points),
+        success: row.success === null ? null : Number(row.success) === 1,
+      })),
+    });
+  } catch (error) {
+    console.error('Audit log report lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load the audit log report.' });
   }
 });
 
@@ -2060,6 +2585,22 @@ app.get('/api/sponsors/:sponsorId/catalog/:productId/live', requireRole('driver'
   }
 });
 
+// Orders are expected to arrive within this many business days (Mon-Fri) of
+// being placed (story 24839). It's an estimate shown to the driver, not a
+// tracked carrier date.
+const DELIVERY_BUSINESS_DAYS = 5;
+const estimatedDeliveryDate = (createdAt) => {
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return null;
+  let added = 0;
+  while (added < DELIVERY_BUSINESS_DAYS) {
+    date.setUTCDate(date.getUTCDate() + 1);
+    const weekday = date.getUTCDay();
+    if (weekday !== 0 && weekday !== 6) added += 1;
+  }
+  return date.toISOString().slice(0, 10);
+};
+
 const orderSummary = (row) => ({
   orderId: Number(row.order_id),
   sponsorId: Number(row.sponsor_id),
@@ -2070,6 +2611,7 @@ const orderSummary = (row) => ({
   pointCost: Number(row.point_cost),
   status: row.status,
   createdAt: row.created_at,
+  estimatedDelivery: row.status === 'canceled' ? null : estimatedDeliveryDate(row.created_at),
 });
 
 // A driver redeems one item from a sponsor's catalog. The price is re-fetched
@@ -2223,6 +2765,39 @@ app.get('/api/orders', requireRole('driver'), async (req, res) => {
   } catch (error) {
     console.error('Order history lookup failed:', error.message);
     return res.status(500).json({ message: 'Unable to load your orders.' });
+  }
+});
+
+// Every order drivers placed from this sponsor's catalog, newest first, so the
+// sponsor can see the points each purchase removed (story 23920). Canceled
+// orders stay listed; their points were returned to the driver.
+app.get('/api/sponsor/orders', requireRole('sponsor'), async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT o.order_id, o.sponsor_id, s.name AS sponsor_name, o.product_id, o.product_title,
+              o.unit_price, o.point_cost, o.status, o.created_at,
+              o.driver_user_id, d.first_name AS driver_first_name, d.last_name AS driver_last_name,
+              d.email AS driver_email
+       FROM orders o
+       JOIN sponsors s ON s.sponsor_id = o.sponsor_id
+       JOIN users d ON d.user_id = o.driver_user_id
+       WHERE o.sponsor_id = ?
+       ORDER BY o.created_at DESC, o.order_id DESC`,
+      [req.currentUser.sponsor_id],
+    );
+    return res.json({
+      orders: rows.map((row) => ({
+        ...orderSummary(row),
+        driver: {
+          id: Number(row.driver_user_id),
+          name: `${row.driver_first_name || ''} ${row.driver_last_name || ''}`.trim() || row.driver_email,
+          email: row.driver_email,
+        },
+      })),
+    });
+  } catch (error) {
+    console.error('Sponsor order lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load driver orders.' });
   }
 });
 

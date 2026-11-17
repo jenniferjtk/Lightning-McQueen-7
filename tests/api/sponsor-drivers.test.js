@@ -37,7 +37,10 @@ describe('sponsor driver list', () => {
 
     const response = await agent.get('/api/sponsor/drivers').expect(200);
 
-    expect(response.body).toEqual({ sponsorLinked: true, drivers: [{ ...driver, points: 125 }] });
+    expect(response.body).toEqual({
+      sponsorLinked: true,
+      drivers: [{ ...driver, points: 125, account_status: 'active', suspended_until: null }],
+    });
     const listQuery = db.execute.mock.calls.find(([sql]) => sql.includes('FROM driver_applications a'));
     expect(listQuery[1]).toEqual([users.sponsor.sponsor_id]);
     expect(listQuery[0]).toContain("a.status = 'approved'");
@@ -60,7 +63,7 @@ describe('sponsor driver list', () => {
     mockQueries([['SELECT role, sponsor_id FROM users', [{ ...users.sponsor, sponsor_id: null }]]]);
 
     await agent.get('/api/sponsor/drivers').expect(200, { sponsorLinked: false, drivers: [] });
-    expect(db.execute).toHaveBeenCalledTimes(2);
+    expect(db.execute).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -176,6 +179,7 @@ describe('sponsor driver redemption history', () => {
     expect(response.body.orders).toEqual([{
       orderId: 51, sponsorId: users.sponsor.sponsor_id, sponsorName: 'Acme Trucking', productId: 9,
       productTitle: 'Hard Drive', unitPrice: 64, pointCost: 6400, status: 'pending', createdAt: redemption.created_at,
+      estimatedDelivery: '2026-11-20',
     }]);
     expect(db.execute.mock.calls.at(-1)[1]).toEqual([users.driver.user_id, users.sponsor.sponsor_id]);
   });

@@ -8,13 +8,17 @@ import AboutPage from './components/AboutPage.jsx';
 import AccountPage from './components/AccountPage.jsx';
 import PointManagementPage from './components/PointManagementPage.jsx';
 import SponsorReportsPage from './components/SponsorReportsPage.jsx';
+import AuditLogReport from './components/AuditLogReport.jsx';
 import SponsorsPage from './components/SponsorsPage.jsx';
 import MyApplicationPage from './components/MyApplicationPage.jsx';
 import AdminHomePage from './components/AdminHomePage.jsx';
 import AdminDriversPage from './components/AdminDriversPage.jsx';
+import AdminSalesReportsPage from './components/AdminSalesReportsPage.jsx';
 import SponsorConversionCard from './components/SponsorConversionCard.jsx';
 import SponsorApplicationsPage from './components/SponsorApplicationsPage.jsx';
 import SponsorDriversPage from './components/SponsorDriversPage.jsx';
+import SponsorOrdersPage from './components/SponsorOrdersPage.jsx';
+import SponsorBillingReport from './components/SponsorBillingReport.jsx';
 import PointChangeReportForm from './components/PointChangeReportForm.jsx';
 import {
   PointsGainedChart, PointsLostChart, PointsTrendChart, SponsorWeeklyPointsChart,
@@ -57,6 +61,7 @@ export default function App() {
   const [driverNotifications, setDriverNotifications] = useState([]);
   const [restockNotifications, setRestockNotifications] = useState([]);
   const [previewRole, setPreviewRole] = useState(null);
+  const [selectedReport, setSelectedReport] = useState('audit-log');
   const [currentPage, setCurrentPage] = useState(() => {
     const pathname = window.location.pathname;
     if (pathname === '/about') return 'about';
@@ -68,6 +73,7 @@ export default function App() {
     if (pathname === '/application') return 'application';
     if (pathname === '/admin') return 'admin';
     if (pathname === '/admin/drivers') return 'drivers';
+    if (pathname === '/admin/reports') return 'admin-reports';
     if (pathname === '/sponsor/applications') return 'sponsor-applications';
     if (pathname === '/sponsor/drivers') return 'sponsor-drivers';
     if (pathname === '/sponsor/catalog') return 'sponsor-catalog';
@@ -94,6 +100,7 @@ export default function App() {
       application: '/application',
       admin: '/admin',
       drivers: '/admin/drivers',
+      'admin-reports': '/admin/reports',
       'sponsor-applications': '/sponsor/applications',
       'sponsor-drivers': '/sponsor/drivers',
       'sponsor-catalog': '/sponsor/catalog',
@@ -282,9 +289,9 @@ export default function App() {
     }
   };
   const isAdmin = user.role === 'admin';
-  const adminPages = ['admin', 'drivers', 'user-log'];
+  const adminPages = ['admin', 'drivers', 'admin-reports', 'user-log'];
   const isSponsor = user.role === 'sponsor';
-  const sponsorPages = ['sponsor-applications', 'sponsor-drivers', 'sponsor-catalog'];
+  const sponsorPages = ['sponsor-applications', 'sponsor-drivers', 'sponsor-catalog', 'sponsor-orders'];
   const isPreview = Boolean(previewRole);
   const viewRole = previewRole || user.role;
   const visiblePage = isPreview
@@ -344,12 +351,23 @@ export default function App() {
         />
       ) : visiblePage === 'drivers' ? (
         <AdminDriversPage />
+      ) : visiblePage === 'admin-reports' ? (
+        <main className="reports-page">
+          <header className="reports-page__intro">
+            <p className="reports-page__eyebrow">Administration</p>
+            <h1>Admin Reports</h1>
+            <p>Review catalog order sales across sponsors and drivers, with flexible date ranges and exportable results.</p>
+          </header>
+          <AdminSalesReportsPage />
+        </main>
       ) : visiblePage === 'sponsor-applications' ? (
         <SponsorApplicationsPage user={previewUser} onPendingCountChange={handlePendingCountChange} preview={isPreview} />
       ) : visiblePage === 'sponsor-drivers' ? (
         <SponsorDriversPage user={previewUser} />
       ) : visiblePage === 'sponsor-catalog' ? (
         <SponsorCatalogPage user={previewUser} />
+      ) : visiblePage === 'sponsor-orders' ? (
+        <SponsorOrdersPage />
       ) : visiblePage === 'about' ? (
         <AboutPage />
       ) : visiblePage === 'account' ? (
@@ -357,7 +375,30 @@ export default function App() {
       ) : visiblePage === 'points' ? (
         <PointManagementPage user={previewUser} sponsors={driver.sponsors} readOnly={isPreview} />
       ) : visiblePage === 'reports' ? (
-        <SponsorReportsPage user={previewUser} />
+        <main className="reports-page">
+          <header className="reports-page__intro">
+            <p className="reports-page__eyebrow">Insights &amp; reporting</p>
+            <h1>Reports that keep every point in view.</h1>
+            <p>Explore driver activity, understand every balance change, and export a report when you need to share it.</p>
+          </header>
+          <div className="reports-selection">
+            <label htmlFor="report-selection">Choose a report</label>
+            <select
+              id="report-selection"
+              value={selectedReport}
+              onChange={(event) => setSelectedReport(event.target.value)}
+            >
+              <option value="audit-log">Audit Log</option>
+              <option value="sponsor-points">Driver Point Report</option>
+              {viewRole === 'admin' && <option value="sponsor-billing">Sponsor Billing</option>}
+            </select>
+          </div>
+          {selectedReport === 'audit-log'
+            ? <AuditLogReport />
+            : selectedReport === 'sponsor-billing' && viewRole === 'admin'
+              ? <SponsorBillingReport />
+              : <SponsorReportsPage user={previewUser} />}
+        </main>
       ) : visiblePage === 'sponsors' ? (
         <SponsorsPage user={previewUser} readOnly={isPreview} />
       ) : visiblePage === 'catalog' ? (

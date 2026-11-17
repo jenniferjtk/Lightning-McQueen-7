@@ -69,7 +69,7 @@ it('opens and closes a read-only application view for an individual driver', asy
   render(<SponsorDriversPage />);
 
   const table = await screen.findByRole('table');
-  fireEvent.click(within(table).getAllByRole('button', { name: 'View application' })[0]);
+  fireEvent.click(within(table).getAllByRole('button', { name: 'Adjust Points' })[0]);
 
   const application = screen.getByRole('region', { name: 'Driver application' });
   expect(within(application).getByRole('heading', { name: 'Alex Racer' })).toBeInTheDocument();
@@ -78,7 +78,7 @@ it('opens and closes a read-only application view for an individual driver', asy
   expect(application).toHaveTextContent('Oct 3, 2026');
   expect(application).toHaveTextContent('Oct 4, 2026');
 
-  fireEvent.click(within(application).getByRole('button', { name: 'Close application' }));
+  fireEvent.click(within(application).getByRole('button', { name: 'Close Panel' }));
   expect(screen.queryByRole('region', { name: 'Driver application' })).not.toBeInTheDocument();
 });
 
@@ -98,7 +98,7 @@ it('shows driver catalog redemptions and removes the driver with a recorded reas
 
   const table = await screen.findByRole('table');
   const driverRow = within(table).getByRole('row', { name: /Dana Driver/ });
-  fireEvent.click(within(driverRow).getByRole('button', { name: 'View application' }));
+  fireEvent.click(within(driverRow).getByRole('button', { name: 'Adjust Points' }));
 
   const redemptions = await screen.findByRole('region', { name: 'Driver catalog redemptions' });
   expect(within(redemptions).getByText('Hard Drive')).toBeInTheDocument();
@@ -128,7 +128,7 @@ it('shows point history for the selected driver on request', async () => {
   render(<SponsorDriversPage />);
 
   const table = await screen.findByRole('table');
-  fireEvent.click(within(table).getAllByRole('button', { name: 'View application' })[0]);
+  fireEvent.click(within(table).getAllByRole('button', { name: 'Adjust Points' })[0]);
   fireEvent.click(within(screen.getByRole('region', { name: 'Driver application' }))
     .getByRole('button', { name: 'Show point history' }));
 
@@ -155,7 +155,7 @@ it('lets a sponsor report a selected driver point change', async () => {
   render(<SponsorDriversPage user={{ sponsorId: 10 }} />);
 
   const table = await screen.findByRole('table');
-  fireEvent.click(within(table).getAllByRole('button', { name: 'View application' })[0]);
+  fireEvent.click(within(table).getAllByRole('button', { name: 'Adjust Points' })[0]);
   fireEvent.click(within(screen.getByRole('region', { name: 'Driver application' }))
     .getByRole('button', { name: 'Show point history' }));
 
@@ -188,7 +188,7 @@ it('explains when the point changes API returns HTML instead of JSON', async () 
   render(<SponsorDriversPage user={{ sponsorId: 10 }} />);
 
   const table = await screen.findByRole('table');
-  fireEvent.click(within(table).getAllByRole('button', { name: 'View application' })[0]);
+  fireEvent.click(within(table).getAllByRole('button', { name: 'Adjust Points' })[0]);
   fireEvent.click(within(screen.getByRole('region', { name: 'Driver application' }))
     .getByRole('button', { name: 'Show point history' }));
 
@@ -214,7 +214,7 @@ it('loads this sponsor’s point rules and updates a driver balance after an adj
   render(<SponsorDriversPage user={{ sponsorId: 10 }} />);
 
   const table = await screen.findByRole('table');
-  fireEvent.click(within(table).getAllByRole('button', { name: 'View application' })[0]);
+  fireEvent.click(within(table).getAllByRole('button', { name: 'Adjust Points' })[0]);
 
   fireEvent.change(await screen.findByLabelText('Point rule'), { target: { value: '7' } });
   expect(screen.queryByRole('option', { name: 'Another sponsor rule (+500 pts)' })).not.toBeInTheDocument();
@@ -225,6 +225,80 @@ it('loads this sponsor’s point rules and updates a driver balance after an adj
   expect(fetch).toHaveBeenCalledWith('/api/points/apply', expect.objectContaining({
     method: 'POST',
     body: JSON.stringify({ driverUserId: 2, ruleId: 7, comment: '' }),
+  }));
+});
+
+it('applies a selected point rule to every driver in the sponsor program at once', async () => {
+  const rules = [
+    { rule_id: 7, sponsor_id: 10, pt_value: 20, description: 'Safe driving bonus' },
+    { rule_id: 8, sponsor_id: 11, pt_value: 500, description: 'Another sponsor rule' },
+  ];
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url, options) => {
+    if (url === '/api/sponsor-rules') {
+      return { ok: true, json: async () => ({ rules }) };
+    }
+    if (url === '/api/points/apply') {
+      const body = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({ change_amount: 20, reason: 'Safe driving bonus', driver_user_id: body.driverUserId }),
+      };
+    }
+    return { ok: true, json: async () => ({ sponsorLinked: true, drivers }) };
+  }));
+  render(<SponsorDriversPage user={{ sponsorId: 10 }} />);
+
+  await screen.findByRole('table');
+  fireEvent.change(screen.getByLabelText('Bulk point rule'), { target: { value: '7' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply to all drivers' }));
+
+  expect(await screen.findByRole('status')).toHaveTextContent('Safe driving bonus was applied to all 3 drivers.');
+  expect(fetch).toHaveBeenCalledWith('/api/points/apply', expect.objectContaining({
+    method: 'POST',
+    body: JSON.stringify({ driverUserId: 1, ruleId: 7, comment: '' }),
+  }));
+  expect(fetch).toHaveBeenCalledWith('/api/points/apply', expect.objectContaining({
+    method: 'POST',
+    body: JSON.stringify({ driverUserId: 2, ruleId: 7, comment: '' }),
+  }));
+  expect(fetch).toHaveBeenCalledWith('/api/points/apply', expect.objectContaining({
+    method: 'POST',
+    body: JSON.stringify({ driverUserId: 3, ruleId: 7, comment: '' }),
+  }));
+});
+
+it('lets a sponsor suspend a driver for a chosen duration', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url, options) => {
+    if (url === '/api/sponsor-rules') {
+      return { ok: true, json: async () => ({ rules: [{ rule_id: 7, sponsor_id: 10, pt_value: 20, description: 'Safe driving bonus' }] }) };
+    }
+    if (url === '/api/sponsor/drivers/2/suspend') {
+      return {
+        ok: true,
+        json: async () => ({ suspended: true, suspendedUntil: '2026-11-18T12:00:00.000Z', message: 'Driver account suspended until 11/18/2026, 12:00:00 PM.' }),
+      };
+    }
+    return {
+      ok: true,
+      json: async () => ({
+        sponsorLinked: true,
+        drivers: drivers.map((driver) => ({ ...driver, account_status: 'active', suspended_until: null })),
+      }),
+    };
+  }));
+  render(<SponsorDriversPage user={{ sponsorId: 10 }} />);
+
+  const table = await screen.findByRole('table');
+  fireEvent.click(within(table).getAllByRole('button', { name: 'Suspend' })[0]);
+
+  const application = screen.getByRole('region', { name: 'Driver application' });
+  fireEvent.change(within(application).getByLabelText('Suspend duration'), { target: { value: '48' } });
+  fireEvent.click(within(application).getByRole('button', { name: 'Suspend account' }));
+
+  expect(await within(application).findByRole('status')).toHaveTextContent('Driver account suspended until');
+  expect(fetch).toHaveBeenCalledWith('/api/sponsor/drivers/2/suspend', expect.objectContaining({
+    method: 'POST',
+    body: JSON.stringify({ durationHours: 48 }),
   }));
 });
 

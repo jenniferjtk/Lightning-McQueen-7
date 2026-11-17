@@ -217,6 +217,8 @@ describe('GET /api/orders', () => {
     expect(res.body.orders).toEqual([{
       orderId: 42, sponsorId: SPONSOR_ID, sponsorName: 'Acme Trucking', productId: 9, productTitle: 'Hard Drive',
       unitPrice: 64, pointCost: 6400, status: 'pending', createdAt: '2026-11-04T15:30:00.000Z',
+      // Wednesday + 5 business days.
+      estimatedDelivery: '2026-11-11',
     }]);
     const [sql, params] = calls('FROM orders o')[0];
     expect(params).toEqual([users.driver.user_id]);
@@ -227,6 +229,24 @@ describe('GET /api/orders', () => {
     const agent = await signIn(app, users.sponsor);
     mockQueries([roleLookup]);
     await agent.get('/api/orders').expect(403);
+  });
+
+  it('estimates delivery five business days out, skipping weekends', async () => {
+    const agent = await signIn(app, users.driver);
+    const row = (order_id, created_at, status = 'pending') => ({
+      order_id, sponsor_id: SPONSOR_ID, sponsor_name: 'Acme Trucking', product_id: 9, product_title: 'Hard Drive',
+      unit_price: '64.00', point_cost: 6400, status, created_at,
+    });
+    mockQueries([roleLookup, ['FROM orders o', [
+      row(1, '2026-11-13T15:00:00.000Z'),
+      row(2, '2026-11-15T15:00:00.000Z'),
+      row(3, '2026-11-04T15:00:00.000Z', 'delivered'),
+      row(4, '2026-11-04T15:00:00.000Z', 'canceled'),
+    ]]]);
+    const res = await agent.get('/api/orders').expect(200);
+    // Friday -> next Friday; Sunday -> next Friday; delivered keeps its
+    // estimate; canceled orders have none.
+    expect(res.body.orders.map((order) => order.estimatedDelivery)).toEqual(['2026-11-20', '2026-11-20', '2026-11-11', null]);
   });
 });
 
@@ -255,6 +275,7 @@ describe('POST /api/orders/:orderId/cancel', () => {
         orderId: 42, sponsorId: SPONSOR_ID, sponsorName: 'Acme Trucking', productId: 9,
         productTitle: 'Hard Drive', unitPrice: 64, pointCost: 6400, status: 'canceled',
         createdAt: pendingOrder.created_at,
+        estimatedDelivery: null,
       },
       pointBalance: 600,
       stockQuantity: 4,

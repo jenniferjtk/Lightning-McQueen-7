@@ -86,7 +86,7 @@ describe('point-change reports', () => {
 
     await agent.post('/api/point-change-reports').send({ pointLogId: 0, details: 'x' }).expect(400);
     await agent.post('/api/point-change-reports').send({ pointLogId: 12, details: ' ' }).expect(400);
-    expect(db.execute).toHaveBeenCalledTimes(3);
+    expect(db.execute).toHaveBeenCalledTimes(2);
   });
 
   it('makes reports available to admins only', async () => {

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 48dp is Android's minimum comfortable touch target (story 23989). -->
+    <dimen name="touch_target">48dp</dimen>
+    <dimen name="screen_padding">20dp</dimen>
+    <dimen name="card_padding">16dp</dimen>
+    <dimen name="corner">8dp</dimen>
+</resources>

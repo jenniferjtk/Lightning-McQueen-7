@@ -1,0 +1,44 @@
+plugins {
+    id 'com.android.application'
+}
+
+def apiBaseUrl = (project.findProperty('apiBaseUrl') ?: 'https://pqo7vj4gc4.execute-api.us-east-2.amazonaws.com').toString()
+
+android {
+    namespace 'com.lightningmcqueen.driver'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.lightningmcqueen.driver'
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName '1.0'
+
+        // The same API the website uses. Override for a local backend with
+        // -PapiBaseUrl=http://10.0.2.2:4000 (the emulator's name for this Mac);
+        // plain http is only allowed when the URL itself is http.
+        buildConfigField 'String', 'API_BASE_URL', "\"${apiBaseUrl}\""
+        manifestPlaceholders = [usesCleartextTraffic: apiBaseUrl.startsWith('http:').toString()]
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    testImplementation 'junit:junit:4.13.2'
+}

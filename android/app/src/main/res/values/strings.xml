@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Lightning McQueen</string>
+    <string name="brand">Lightning McQueen</string>
+    <string name="login_eyebrow">DRIVER REWARDS</string>
+    <string name="login_title">Welcome back.</string>
+    <string name="login_subtitle">Sign in to view your points and redeem rewards.</string>
+    <string name="email">Email address</string>
+    <string name="password">Password</string>
+    <string name="log_in">Log in</string>
+    <string name="signing_in">Signing in…</string>
+    <string name="log_out">Log out</string>
+    <string name="drivers_only">This app is for drivers. Sponsors and admins can use the website.</string>
+    <string name="enter_email_password">Enter your email and password.</string>
+    <string name="current_balance">CURRENT POINT BALANCE</string>
+    <string name="your_sponsors">Your sponsor catalogs</string>
+    <string name="no_sponsors">Once a sponsor approves your application, their rewards catalog will appear here.</string>
+    <string name="recent_updates">Recent point updates</string>
+    <string name="no_recent_updates">No recent point changes yet.</string>
+    <string name="loading">Loading…</string>
+    <string name="retry">Try again</string>
+    <string name="back">Back</string>
+    <string name="your_balance_with">Your balance with %1$s</string>
+    <string name="catalog_title">%1$s catalog</string>
+    <string name="catalog_empty">%1$s hasn\'t added any rewards yet.</string>
+    <string name="catalog_stale">Some reward details may be out of date while the product provider is unavailable.</string>
+    <string name="redeem_for">Redeem for %1$s</string>
+    <string name="need_more">Need %1$s more</string>
+    <string name="confirm_order">Confirm your order</string>
+    <string name="place_order">Place order</string>
+    <string name="cancel">Cancel</string>
+    <string name="ok">OK</string>
+    <string name="placing_order">Placing order…</string>
+    <string name="order_placed">Order placed</string>
+    <string name="review_order">Review order</string>
+    <string name="no_address">Save a shipping address on the website (Catalog → Shipping address) before ordering.</string>
+    <string name="not_enough_points">Not enough points. You need %1$s more points to order this item.</string>
+    <string name="session_expired">Your session ended. Please sign in again.</string>
+</resources>

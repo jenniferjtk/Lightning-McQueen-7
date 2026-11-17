@@ -29,6 +29,10 @@ function formatDate(dateValue) {
     : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+function formatSignedPoints(value) {
+  return `${value > 0 ? '+' : ''}${Number(value).toLocaleString()} pts`;
+}
+
 export default function SponsorDriversPage({ user }) {
   const [drivers, setDrivers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -52,6 +56,13 @@ export default function SponsorDriversPage({ user }) {
   const [dropReason, setDropReason] = useState('');
   const [dropError, setDropError] = useState('');
   const [droppingDriver, setDroppingDriver] = useState(false);
+  const [bulkRuleId, setBulkRuleId] = useState('');
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [bulkStatus, setBulkStatus] = useState({ type: '', message: '' });
+  const [suspendHours, setSuspendHours] = useState(24);
+  const [suspendUnit, setSuspendUnit] = useState('hours');
+  const [suspendSubmitting, setSuspendSubmitting] = useState(false);
+  const [suspendStatus, setSuspendStatus] = useState({ type: '', message: '' });
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
@@ -174,6 +185,98 @@ export default function SponsorDriversPage({ user }) {
   }, [drivers, search, sort]);
   const selectedDriver = drivers.find((driver) => driver.id === selectedDriverId);
 
+  const durationHours = suspendUnit === 'days' ? suspendHours * 24 : suspendUnit === 'weeks' ? suspendHours * 24 * 7 : suspendHours;
+
+  const applyBulkPoints = async () => {
+    if (!bulkRuleId) return;
+
+    const selectedRule = rules.find((rule) => Number(rule.rule_id) === Number(bulkRuleId));
+    const pointChange = Number(selectedRule?.pt_value ?? 0);
+    if (drivers.length === 0) {
+      setBulkStatus({ type: 'error', message: 'No drivers are available to adjust.' });
+      return;
+    }
+    if (Math.abs(pointChange) >= 100) {
+      const action = pointChange < 0 ? 'remove' : 'add';
+      if (!window.confirm(`Are you sure you want to ${action} ${Math.abs(pointChange).toLocaleString()} points for every driver?`)) return;
+    }
+
+    setBulkSubmitting(true);
+    setBulkStatus({ type: '', message: '' });
+
+    let successCount = 0;
+    let failureCount = 0;
+
+    for (const driver of drivers) {
+      try {
+        const response = await fetch('/api/points/apply', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ driverUserId: driver.id, ruleId: Number(bulkRuleId), comment: '' }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.message || 'Unable to apply the point rule.');
+
+        successCount += 1;
+        setDrivers((current) => current.map((currentDriver) => (
+          currentDriver.id === driver.id
+            ? { ...currentDriver, points: pointValue(currentDriver) + Number(data.change_amount) }
+            : currentDriver
+        )));
+      } catch {
+        failureCount += 1;
+      }
+    }
+
+    setBulkSubmitting(false);
+    setBulkStatus({
+      type: failureCount > 0 ? 'error' : 'success',
+      message: failureCount > 0
+        ? `Applied ${selectedRule?.description || 'the selected rule'} to ${successCount} driver${successCount === 1 ? '' : 's'}. ${failureCount} driver${failureCount === 1 ? '' : 's'} could not be updated.`
+        : `${selectedRule?.description || 'The selected rule'} was applied to all ${successCount} driver${successCount === 1 ? '' : 's'}.`,
+    });
+    setBulkRuleId('');
+  };
+
+  const handleSuspendSelectedDriver = async () => {
+    if (!selectedDriver) return;
+    const duration = selectedDriver.account_status === 'suspended' ? 0 : Number(durationHours);
+
+    if (selectedDriver.account_status !== 'suspended' && (!Number.isFinite(duration) || duration <= 0 || duration > 8760)) {
+      setSuspendStatus({ type: 'error', message: 'Choose a suspension length between 1 hour and 365 days.' });
+      return;
+    }
+
+    setSuspendSubmitting(true);
+    setSuspendStatus({ type: '', message: '' });
+
+    try {
+      const response = await fetch(`/api/sponsor/drivers/${selectedDriver.id}/suspend`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ durationHours: duration }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || 'Unable to update the driver account status.');
+
+      setDrivers((current) => current.map((driver) => (
+        driver.id === selectedDriver.id
+          ? { ...driver, account_status: data.suspended ? 'suspended' : 'active', suspended_until: data.suspendedUntil || null }
+          : driver
+      )));
+      setSuspendStatus({
+        type: 'success',
+        message: data.suspended
+          ? `Driver account suspended until ${new Date(data.suspendedUntil).toLocaleString()}.`
+          : 'Driver account re-enabled.',
+      });
+    } catch (error) {
+      setSuspendStatus({ type: 'error', message: error.message });
+    } finally {
+      setSuspendSubmitting(false);
+    }
+  };
+
   return (
     <main className="driver-management-page">
       <section className="driver-management-page__intro">
@@ -220,6 +323,47 @@ export default function SponsorDriversPage({ user }) {
             {visibleDrivers.length} {visibleDrivers.length === 1 ? 'driver' : 'drivers'}
           </p>
 
+          <div className="driver-management__bulk-adjustment">
+            <h2>Adjust points for all drivers</h2>
+            {rules.length === 0 ? (
+              <p className="driver-management-page__message">Create a point rule to adjust all drivers' points.</p>
+            ) : (
+              <>
+                <label>
+                  Bulk point rule
+                  <select
+                    value={bulkRuleId}
+                    onChange={(event) => setBulkRuleId(event.target.value)}
+                    aria-label="Bulk point rule"
+                  >
+                    <option value="">Choose a rule...</option>
+                    {rules.map((rule) => (
+                      <option key={rule.rule_id} value={rule.rule_id}>
+                        {rule.description} ({formatSignedPoints(Number(rule.pt_value))})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="applications-table__decide"
+                  disabled={bulkSubmitting || !bulkRuleId}
+                  onClick={applyBulkPoints}
+                >
+                  {bulkSubmitting ? 'Applying...' : 'Apply to all drivers'}
+                </button>
+                {bulkStatus.message && (
+                  <p
+                    className={`adjust-points__status adjust-points__status--${bulkStatus.type || 'success'}`}
+                    role={bulkStatus.type === 'error' ? 'alert' : 'status'}
+                  >
+                    {bulkStatus.message}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+
           {selectedDriver && (
             <section className="driver-management__application" aria-label="Driver application">
               <div className="driver-management__application-heading">
@@ -243,9 +387,51 @@ export default function SponsorDriversPage({ user }) {
                       setPointHistoryVisible(false);
                     }}
                   >
-                    Close application
+                    Close Panel
                   </button>
                 </div>
+              </div>
+              <div className="driver-management__account-access">
+                <div className="driver-management__account-access-header">
+                  <h3>Account access</h3>
+                  <span className={`applications-table__status applications-table__status--${selectedDriver.account_status === 'suspended' ? 'rejected' : 'approved'}`}>
+                    {selectedDriver.account_status === 'suspended' ? 'Suspended' : 'Active'}
+                  </span>
+                </div>
+                <div className="driver-management__suspension-form">
+                  <label>
+                    Suspend for
+                    <input
+                      type="number"
+                      min="1"
+                      max="8760"
+                      step="1"
+                      value={suspendHours}
+                      onChange={(event) => setSuspendHours(Number(event.target.value) || 1)}
+                      aria-label="Suspend duration"
+                    />
+                  </label>
+                  <label>
+                    <select value={suspendUnit} onChange={(event) => setSuspendUnit(event.target.value)} aria-label="Suspend unit">
+                      <option value="hours">hours</option>
+                      <option value="days">days</option>
+                      <option value="weeks">weeks</option>
+                    </select>
+                  </label>
+                  <button type="button" onClick={handleSuspendSelectedDriver} disabled={suspendSubmitting}>
+                    {selectedDriver.account_status === 'suspended' ? 'Re-enable account' : 'Suspend account'}
+                  </button>
+                </div>
+                {suspendStatus.message && (
+                  <p className={`adjust-points__status adjust-points__status--${suspendStatus.type || 'success'}`} role={suspendStatus.type === 'error' ? 'alert' : 'status'}>
+                    {suspendStatus.message}
+                  </p>
+                )}
+                {selectedDriver.account_status === 'suspended' && selectedDriver.suspended_until && (
+                  <p className="driver-management__suspension-note">
+                    Re-enables automatically on {new Date(selectedDriver.suspended_until).toLocaleString()}.
+                  </p>
+                )}
               </div>
               <dl className="driver-management__application-details">
                 <div>
@@ -402,17 +588,29 @@ export default function SponsorDriversPage({ user }) {
                       <td>{driver.email}</td>
                       <td>{pointValue(driver).toLocaleString()}</td>
                       <td>
-                        <button
-                          type="button"
-                          className="driver-management__view-application"
-                          aria-pressed={selectedDriverId === driver.id}
-                          onClick={() => {
-                            setSelectedDriverId(driver.id);
-                            setPointHistoryVisible(false);
-                          }}
-                        >
-                          {selectedDriverId === driver.id ? 'Viewing application' : 'View application'}
-                        </button>
+                        <div className="driver-management__row-actions">
+                          <button
+                            type="button"
+                            className="driver-management__view-application"
+                            aria-pressed={selectedDriverId === driver.id}
+                            onClick={() => {
+                              setSelectedDriverId(driver.id);
+                              setPointHistoryVisible(false);
+                            }}
+                          >
+                            Adjust Points
+                          </button>
+                          <button
+                            type="button"
+                            className="driver-management__suspend-driver"
+                            onClick={() => {
+                              setSelectedDriverId(driver.id);
+                              setPointHistoryVisible(false);
+                            }}
+                          >
+                            {driver.account_status === 'suspended' ? 'Re-enable' : 'Suspend'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

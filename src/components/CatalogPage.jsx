@@ -1,9 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ORDER_STATUSES, deliveryLabel, formatDeliveryDate, formatOrderDate, formatPoints, formatPrice, orderDateKey, orderStatusLabel } from '../orders.js';
 import { favoriteStorageKey, readFavorites } from '../utils/catalogFavorites.js';
 
-const formatPrice = (price) => Number(price).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
-const formatPoints = (points) => `${Number(points).toLocaleString()} pts`;
-const formatOrderDate = (value) => new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 const hasRequiredAddress = (address) => Boolean(address
   && address.streetAddress?.trim() && address.city?.trim() && address.zipCode?.trim() && address.country?.trim());
 const addressLine = (address) => [address.streetAddress, address.city, address.state, address.zipCode, address.country]
@@ -33,6 +31,11 @@ export default function CatalogPage({ sponsors = [], userId, onOrderPlaced, onOr
   const [ordersError, setOrdersError] = useState('');
   const [orderActionError, setOrderActionError] = useState('');
   const [cancellingOrderId, setCancellingOrderId] = useState(null);
+  const [confirmingCancelId, setConfirmingCancelId] = useState(null);
+  const [orderNotice, setOrderNotice] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [confirmingProductId, setConfirmingProductId] = useState(null);
   const [placingOrder, setPlacingOrder] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
@@ -234,9 +237,9 @@ export default function CatalogPage({ sponsors = [], userId, onOrderPlaced, onOr
   };
 
   const cancelOrder = async (order) => {
-    if (!window.confirm(`Cancel order #${order.orderId} for ${order.productTitle}? The points will be returned to your balance.`)) return;
     setCancellingOrderId(order.orderId);
     setOrderActionError('');
+    setOrderNotice('');
     try {
       const response = await fetch(`/api/orders/${order.orderId}/cancel`, {
         method: 'POST',
@@ -252,11 +255,29 @@ export default function CatalogPage({ sponsors = [], userId, onOrderPlaced, onOr
         }
       }
       onOrderCanceled?.(data.order);
+      setConfirmingCancelId(null);
+      setOrderNotice(`Order #${order.orderId} canceled. ${formatPoints(order.pointCost)} returned to your ${order.sponsorName} balance.`);
     } catch (requestError) {
       setOrderActionError(requestError.message);
     } finally {
       setCancellingOrderId(null);
     }
+  };
+
+  // Date range filter (story 25070). An end date before the start date is
+  // flagged and ignored rather than hiding every order.
+  const dateRangeInvalid = Boolean(fromDate && toDate && fromDate > toDate);
+  const ordersInRange = dateRangeInvalid ? orders : orders.filter((order) => {
+    const day = orderDateKey(order.createdAt);
+    return (!fromDate || day >= fromDate) && (!toDate || day <= toDate);
+  });
+  const visibleOrders = statusFilter ? ordersInRange.filter((order) => order.status === statusFilter) : ordersInRange;
+  const filtersActive = Boolean(statusFilter || fromDate || toDate);
+  const clearOrderFilters = () => {
+    setStatusFilter('');
+    setFromDate('');
+    setToDate('');
+    setConfirmingCancelId(null);
   };
 
   return (
@@ -389,6 +410,7 @@ export default function CatalogPage({ sponsors = [], userId, onOrderPlaced, onOr
                 <div><dt>Points spent</dt><dd>{formatPoints(placedOrder.pointCost)}</dd></div>
                 <div><dt>New balance</dt><dd>{formatPoints(placedOrder.pointBalance)}</dd></div>
                 <div><dt>Ordered on</dt><dd>{formatOrderDate(placedOrder.createdAt)}</dd></div>
+                {placedOrder.estimatedDelivery && <div><dt>Estimated delivery</dt><dd>{formatDeliveryDate(placedOrder.estimatedDelivery)}</dd></div>}
                 {placedOrder.shipsTo && <div><dt>Ships to</dt><dd>{placedOrder.shipsTo}</dd></div>}
               </dl>
               <button type="button" onClick={() => setPlacedOrder(null)}>Back to catalog</button>
@@ -578,43 +600,103 @@ export default function CatalogPage({ sponsors = [], userId, onOrderPlaced, onOr
           </div>
         ) : (
           <>
+            <div className="catalog-orders__controls">
+              <label>
+                From
+                <input type="date" value={fromDate} max={toDate || undefined} onChange={(event) => { setFromDate(event.target.value); setConfirmingCancelId(null); }} />
+              </label>
+              <label>
+                To
+                <input type="date" value={toDate} min={fromDate || undefined} onChange={(event) => { setToDate(event.target.value); setConfirmingCancelId(null); }} />
+              </label>
+              <label>
+                Show
+                <select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setConfirmingCancelId(null); }}>
+                  <option value="">All orders ({ordersInRange.length})</option>
+                  {ORDER_STATUSES.map(({ value, label }) => (
+                    <option key={value} value={value}>
+                      {label} ({ordersInRange.filter((order) => order.status === value).length})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {filtersActive && (
+                <button type="button" className="catalog-orders__clear" onClick={clearOrderFilters}>Clear filters</button>
+              )}
+            </div>
+            {dateRangeInvalid && (
+              <p className="catalog-address-form__error" role="alert">The end date is before the start date, so the date range isn't applied.</p>
+            )}
+            {orderNotice && <p className="catalog-address-form__message" role="status">{orderNotice}</p>}
             {orderActionError && <p className="catalog-address-form__error" role="alert">{orderActionError}</p>}
-            <table className="catalog-orders__table">
-              <caption className="visually-hidden">Your orders, newest first</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Order date</th>
-                  <th scope="col">Item</th>
-                  <th scope="col">Sponsor</th>
-                  <th scope="col">Points</th>
-                  <th scope="col">Status</th>
-                  <th scope="col"><span className="visually-hidden">Actions</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {orders.map((order) => (
-                  <tr key={order.orderId}>
-                    <td><time dateTime={order.createdAt}>{formatOrderDate(order.createdAt)}</time></td>
-                    <td>{order.productTitle}</td>
-                    <td>{order.sponsorName}</td>
-                    <td>{formatPoints(order.pointCost)}</td>
-                    <td>{order.status}</td>
-                    <td>
-                      {order.status === 'pending' && (
-                        <button
-                          className="catalog-order-cancel"
-                          type="button"
-                          disabled={cancellingOrderId !== null}
-                          onClick={() => cancelOrder(order)}
-                        >
-                          {cancellingOrderId === order.orderId ? 'Canceling...' : `Cancel order ${order.orderId}`}
-                        </button>
-                      )}
-                    </td>
+            {visibleOrders.length === 0 ? (
+              <div className="catalog-no-results" role="status">
+                <h3>{statusFilter ? `No ${orderStatusLabel(statusFilter).toLowerCase()} orders` : 'No orders'}{fromDate || toDate ? ' in this date range' : ''}</h3>
+                <p>Change the filters to see the rest of your orders.</p>
+                <button type="button" onClick={clearOrderFilters}>Show all orders</button>
+              </div>
+            ) : (
+              <table className="catalog-orders__table">
+                <caption className="visually-hidden">Your orders, newest first</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Order date</th>
+                    <th scope="col">Item</th>
+                    <th scope="col">Sponsor</th>
+                    <th scope="col">Points</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Delivery</th>
+                    <th scope="col"><span className="visually-hidden">Actions</span></th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {visibleOrders.map((order) => (
+                    <React.Fragment key={order.orderId}>
+                      <tr>
+                        <td><time dateTime={order.createdAt}>{formatOrderDate(order.createdAt)}</time></td>
+                        <td>{order.productTitle}</td>
+                        <td>{order.sponsorName}</td>
+                        <td>{formatPoints(order.pointCost)}</td>
+                        <td><span className={`catalog-order-status catalog-order-status--${order.status}`}>{orderStatusLabel(order.status)}</span></td>
+                        <td className="catalog-orders__delivery">{deliveryLabel(order)}</td>
+                        <td>
+                          {order.status === 'pending' && confirmingCancelId !== order.orderId && (
+                            <button
+                              className="catalog-order-cancel"
+                              type="button"
+                              aria-label={`Cancel order ${order.orderId}`}
+                              disabled={cancellingOrderId !== null}
+                              onClick={() => { setOrderActionError(''); setOrderNotice(''); setConfirmingCancelId(order.orderId); }}
+                            >
+                              Cancel
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                      {confirmingCancelId === order.orderId && (
+                        <tr className="catalog-orders__confirm-row">
+                          <td colSpan={7}>
+                            <div className="catalog-order-confirm" role="dialog" aria-labelledby={`cancel-order-title-${order.orderId}`}>
+                              <p id={`cancel-order-title-${order.orderId}`}>
+                                Cancel order #{order.orderId} for {order.productTitle}? {formatPoints(order.pointCost)} will be returned to your {order.sponsorName} balance.
+                              </p>
+                              <div className="catalog-checkout__actions">
+                                <button type="button" disabled={cancellingOrderId !== null} onClick={() => cancelOrder(order)}>
+                                  {cancellingOrderId === order.orderId ? 'Canceling...' : 'Yes, cancel order'}
+                                </button>
+                                <button type="button" className="catalog-checkout__cancel" disabled={cancellingOrderId !== null} onClick={() => setConfirmingCancelId(null)}>
+                                  Keep order
+                                </button>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </>
         )}
       </section>

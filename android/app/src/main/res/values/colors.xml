@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Same palette as the website (src/App.css :root). -->
+<resources>
+    <color name="asphalt">#1B2430</color>
+    <color name="asphalt_light">#293545</color>
+    <color name="paper">#F5F3EE</color>
+    <color name="card">#FFFFFF</color>
+    <color name="steel">#3A6EA5</color>
+    <color name="amber">#D98E2E</color>
+    <color name="ink">#1B2430</color>
+    <color name="slate">#5B6B79</color>
+    <color name="line">#E4E0D6</color>
+    <color name="positive">#24633A</color>
+    <color name="negative">#963B31</color>
+    <color name="error_background">#FBEFED</color>
+</resources>
