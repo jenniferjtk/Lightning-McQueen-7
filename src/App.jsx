@@ -17,6 +17,7 @@ import SponsorConversionCard from './components/SponsorConversionCard.jsx';
 import SponsorApplicationsPage from './components/SponsorApplicationsPage.jsx';
 import SponsorDriversPage from './components/SponsorDriversPage.jsx';
 import SponsorOrdersPage from './components/SponsorOrdersPage.jsx';
+import SponsorBillingReport from './components/SponsorBillingReport.jsx';
 import PointChangeReportForm from './components/PointChangeReportForm.jsx';
 import {
   PointsGainedChart, PointsLostChart, PointsTrendChart, SponsorWeeklyPointsChart,
@@ -239,11 +240,14 @@ export default function App() {
             >
               <option value="audit-log">Audit Log</option>
               <option value="sponsor-points">Driver Point Report</option>
+              {viewRole === 'admin' && <option value="sponsor-billing">Sponsor Billing</option>}
             </select>
           </div>
           {selectedReport === 'audit-log'
             ? <AuditLogReport />
-            : <SponsorReportsPage user={previewUser} />}
+            : selectedReport === 'sponsor-billing' && viewRole === 'admin'
+              ? <SponsorBillingReport />
+              : <SponsorReportsPage user={previewUser} />}
         </main>
       ) : visiblePage === 'sponsors' ? (
         <SponsorsPage user={previewUser} readOnly={isPreview} />
