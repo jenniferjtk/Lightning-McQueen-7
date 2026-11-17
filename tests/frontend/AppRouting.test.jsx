@@ -176,6 +176,11 @@ it('routes sponsors to the catalog page', async () => {
   expect(await screen.findByRole('heading', { level: 1, name: 'Product catalog.' })).toBeInTheDocument();
 });
 
+it('routes sponsors directly to the driver orders page', async () => {
+  renderAs('sponsor', '/sponsor/orders');
+  expect(await screen.findByRole('heading', { level: 1, name: 'Driver orders.' })).toBeInTheDocument();
+});
+
 it('shows the reports page and navigation link for admins', async () => {
   renderAs('admin', '/reports');
   expect(await screen.findByRole('heading', { name: 'Audit Log' })).toBeInTheDocument();

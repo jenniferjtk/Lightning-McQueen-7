@@ -598,7 +598,7 @@ export default function SponsorDriversPage({ user }) {
                               setPointHistoryVisible(false);
                             }}
                           >
-                            Adjust Points
+                            Edit Driver
                           </button>
                           <button
                             type="button"

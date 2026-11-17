@@ -77,6 +77,7 @@ export default function App() {
     if (pathname === '/sponsor/applications') return 'sponsor-applications';
     if (pathname === '/sponsor/drivers') return 'sponsor-drivers';
     if (pathname === '/sponsor/catalog') return 'sponsor-catalog';
+    if (pathname === '/sponsor/orders') return 'sponsor-orders';
     return 'dashboard';
   });
 
@@ -104,6 +105,7 @@ export default function App() {
       'sponsor-applications': '/sponsor/applications',
       'sponsor-drivers': '/sponsor/drivers',
       'sponsor-catalog': '/sponsor/catalog',
+      'sponsor-orders': '/sponsor/orders',
     };
     const path = pathMap[currentPage] || '/';
     window.history.pushState({}, '', path);
