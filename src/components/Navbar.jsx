@@ -24,6 +24,7 @@ const SPONSOR_LINKS = [
   { label: 'Driver Management', value: 'sponsor-drivers' },
   { label: 'Applications', value: 'sponsor-applications', showsPendingCount: true },
   { label: 'Catalog', value: 'sponsor-catalog' },
+  { label: 'Driver Orders', value: 'sponsor-orders' },
   { label: 'Point Management', value: 'points' },
   { label: 'Reports', value: 'reports' },
   { label: 'About Page', value: 'about' },

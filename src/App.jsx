@@ -16,6 +16,7 @@ import AdminSalesReportsPage from './components/AdminSalesReportsPage.jsx';
 import SponsorConversionCard from './components/SponsorConversionCard.jsx';
 import SponsorApplicationsPage from './components/SponsorApplicationsPage.jsx';
 import SponsorDriversPage from './components/SponsorDriversPage.jsx';
+import SponsorOrdersPage from './components/SponsorOrdersPage.jsx';
 import PointChangeReportForm from './components/PointChangeReportForm.jsx';
 import {
   PointsGainedChart, PointsLostChart, PointsTrendChart, SponsorWeeklyPointsChart,
@@ -158,7 +159,7 @@ export default function App() {
   const isAdmin = user.role === 'admin';
   const adminPages = ['admin', 'drivers', 'admin-reports', 'user-log'];
   const isSponsor = user.role === 'sponsor';
-  const sponsorPages = ['sponsor-applications', 'sponsor-drivers', 'sponsor-catalog'];
+  const sponsorPages = ['sponsor-applications', 'sponsor-drivers', 'sponsor-catalog', 'sponsor-orders'];
   const isPreview = Boolean(previewRole);
   const viewRole = previewRole || user.role;
   const visiblePage = isPreview
@@ -214,6 +215,8 @@ export default function App() {
         <SponsorDriversPage user={previewUser} />
       ) : visiblePage === 'sponsor-catalog' ? (
         <SponsorCatalogPage user={previewUser} />
+      ) : visiblePage === 'sponsor-orders' ? (
+        <SponsorOrdersPage />
       ) : visiblePage === 'about' ? (
         <AboutPage />
       ) : visiblePage === 'account' ? (

@@ -2373,6 +2373,22 @@ app.get('/api/sponsors/:sponsorId/catalog/:productId/live', requireRole('driver'
   }
 });
 
+// Orders are expected to arrive within this many business days (Mon-Fri) of
+// being placed (story 24839). It's an estimate shown to the driver, not a
+// tracked carrier date.
+const DELIVERY_BUSINESS_DAYS = 5;
+const estimatedDeliveryDate = (createdAt) => {
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return null;
+  let added = 0;
+  while (added < DELIVERY_BUSINESS_DAYS) {
+    date.setUTCDate(date.getUTCDate() + 1);
+    const weekday = date.getUTCDay();
+    if (weekday !== 0 && weekday !== 6) added += 1;
+  }
+  return date.toISOString().slice(0, 10);
+};
+
 const orderSummary = (row) => ({
   orderId: Number(row.order_id),
   sponsorId: Number(row.sponsor_id),
@@ -2383,6 +2399,7 @@ const orderSummary = (row) => ({
   pointCost: Number(row.point_cost),
   status: row.status,
   createdAt: row.created_at,
+  estimatedDelivery: row.status === 'canceled' ? null : estimatedDeliveryDate(row.created_at),
 });
 
 // A driver redeems one item from a sponsor's catalog. The price is re-fetched
@@ -2536,6 +2553,39 @@ app.get('/api/orders', requireRole('driver'), async (req, res) => {
   } catch (error) {
     console.error('Order history lookup failed:', error.message);
     return res.status(500).json({ message: 'Unable to load your orders.' });
+  }
+});
+
+// Every order drivers placed from this sponsor's catalog, newest first, so the
+// sponsor can see the points each purchase removed (story 23920). Canceled
+// orders stay listed; their points were returned to the driver.
+app.get('/api/sponsor/orders', requireRole('sponsor'), async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT o.order_id, o.sponsor_id, s.name AS sponsor_name, o.product_id, o.product_title,
+              o.unit_price, o.point_cost, o.status, o.created_at,
+              o.driver_user_id, d.first_name AS driver_first_name, d.last_name AS driver_last_name,
+              d.email AS driver_email
+       FROM orders o
+       JOIN sponsors s ON s.sponsor_id = o.sponsor_id
+       JOIN users d ON d.user_id = o.driver_user_id
+       WHERE o.sponsor_id = ?
+       ORDER BY o.created_at DESC, o.order_id DESC`,
+      [req.currentUser.sponsor_id],
+    );
+    return res.json({
+      orders: rows.map((row) => ({
+        ...orderSummary(row),
+        driver: {
+          id: Number(row.driver_user_id),
+          name: `${row.driver_first_name || ''} ${row.driver_last_name || ''}`.trim() || row.driver_email,
+          email: row.driver_email,
+        },
+      })),
+    });
+  } catch (error) {
+    console.error('Sponsor order lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load driver orders.' });
   }
 });
 

@@ -266,7 +266,7 @@ describe('CatalogPage checkout', () => {
 
   const placed = {
     orderId: 7, sponsorId: 1, sponsorName: 'Acme Trucking', productId: 2, productTitle: 'Hard Drive',
-    unitPrice: 64, pointCost: 50, status: 'pending', createdAt: '2026-11-04T15:30:00.000Z',
+    unitPrice: 64, pointCost: 50, status: 'pending', createdAt: '2026-11-04T15:30:00.000Z', estimatedDelivery: '2026-11-11',
   };
   const jsonResponse = (body, status = 200) => Promise.resolve({ ok: status < 400, status, json: async () => body });
 
@@ -314,6 +314,7 @@ describe('CatalogPage checkout', () => {
     expect(JSON.parse(post[1].body)).toEqual({ sponsorId: 1, productId: 2, expectedPointCost: 50 });
     expect(screen.getByText('Order #7')).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('Your order for Hard Drive is confirmed.');
+    expect(screen.getByText('Estimated delivery').nextSibling).toHaveTextContent('Nov 11, 2026');
     // The balance drops right away, with no reload.
     expect(within(balanceBanner()).getByText('60 pts')).toBeInTheDocument();
     expect(onOrderPlaced).toHaveBeenCalledWith(placed);
@@ -413,8 +414,8 @@ describe('CatalogPage checkout', () => {
 
     const rows = within(await screen.findByRole('table')).getAllByRole('row').slice(1);
     expect(rows.map((row) => [...row.querySelectorAll('td')].map((cell) => cell.textContent))).toEqual([
-      ['Nov 4, 2026', 'Hard Drive', 'Acme Trucking', '50 pts', 'Pending', 'Cancel'],
-      ['Oct 20, 2026', 'Backpack', 'Acme Trucking', '110 pts', 'Pending', 'Cancel'],
+      ['Nov 4, 2026', 'Hard Drive', 'Acme Trucking', '50 pts', 'Pending', 'Arrives by Nov 11, 2026', 'Cancel'],
+      ['Oct 20, 2026', 'Backpack', 'Acme Trucking', '110 pts', 'Pending', 'Arrives by Nov 11, 2026', 'Cancel'],
     ]);
     expect(screen.queryByText('No orders yet')).not.toBeInTheDocument();
   });
@@ -475,8 +476,11 @@ describe('CatalogPage checkout', () => {
 
     const table = await screen.findByRole('table');
     for (const label of ['Pending', 'Shipped', 'Delivered', 'Canceled']) {
-      expect(within(table).getByText(label)).toHaveClass(`catalog-order-status--${label.toLowerCase()}`);
+      expect(within(table).getByText(label, { selector: '.catalog-order-status' })).toHaveClass(`catalog-order-status--${label.toLowerCase()}`);
     }
+    // Delivered orders say so instead of an estimate; canceled orders have none.
+    const deliveryCells = [...table.querySelectorAll('.catalog-orders__delivery')].map((cell) => cell.textContent);
+    expect(deliveryCells).toEqual(['Arrives by Nov 11, 2026', 'Arrives by Nov 11, 2026', 'Delivered', '—']);
     // Only the pending order can be canceled.
     expect(within(table).getAllByRole('button', { name: /^Cancel order/ }).map((button) => button.getAttribute('aria-label'))).toEqual(['Cancel order 1']);
   });
@@ -508,5 +512,44 @@ describe('CatalogPage checkout', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Show all orders' }));
     expect(itemTitles()).toEqual(['Jacket', 'Backpack', 'Hard Drive']);
+  });
+
+  it('filters order history by date range', async () => {
+    // Local-time timestamps so the calendar day doesn't depend on the test machine's zone.
+    stubCheckoutApi({
+      orders: [
+        { ...placed, orderId: 3, productTitle: 'Jacket', status: 'shipped', createdAt: '2026-11-15T12:00:00' },
+        { ...placed, orderId: 2, productTitle: 'Backpack', status: 'pending', createdAt: '2026-11-10T09:00:00' },
+        { ...placed, orderId: 1, productTitle: 'Hard Drive', status: 'pending', createdAt: '2026-11-01T18:00:00' },
+      ],
+    });
+    render(<CatalogPage sponsors={[sponsors[0]]} userId={5} />);
+    const itemTitles = () => within(screen.getByRole('table')).getAllByRole('row').slice(1)
+      .map((row) => row.querySelectorAll('td')[1].textContent);
+    await screen.findByRole('table');
+
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-11-10' } });
+    expect(itemTitles()).toEqual(['Jacket', 'Backpack']);
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-11-10' } });
+    expect(itemTitles()).toEqual(['Backpack']);
+    // Status counts follow the date range.
+    expect([...screen.getByLabelText('Show').options].map((option) => option.textContent)[1]).toBe('Pending (1)');
+
+    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'shipped' } });
+    expect(screen.getByRole('heading', { name: 'No shipped orders in this date range' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(itemTitles()).toEqual(['Jacket', 'Backpack', 'Hard Drive']);
+    expect(screen.getByLabelText('From')).toHaveValue('');
+  });
+
+  it('ignores a date range whose end is before its start', async () => {
+    stubCheckoutApi({ orders: [{ ...placed, orderId: 1, productTitle: 'Jacket', status: 'pending', createdAt: '2026-11-15T12:00:00' }] });
+    render(<CatalogPage sponsors={[sponsors[0]]} userId={5} />);
+    await screen.findByRole('table');
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-11-20' } });
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-11-01' } });
+    expect(screen.getByRole('alert')).toHaveTextContent('end date is before the start date');
+    expect(within(screen.getByRole('table')).getByText('Jacket')).toBeInTheDocument();
   });
 });
