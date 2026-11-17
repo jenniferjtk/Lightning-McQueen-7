@@ -1,15 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ORDER_STATUSES, deliveryLabel, formatDeliveryDate, formatOrderDate, formatPoints, formatPrice, orderDateKey, orderStatusLabel } from '../orders.js';
-
-const favoriteStorageKey = (userId) => `driver-catalog-favorites-${userId ?? 'guest'}`;
-
-function readFavorites(userId) {
-  try {
-    return new Set(JSON.parse(localStorage.getItem(favoriteStorageKey(userId)) || '[]'));
-  } catch {
-    return new Set();
-  }
-}
+import { favoriteStorageKey, readFavorites } from '../utils/catalogFavorites.js';
 
 const hasRequiredAddress = (address) => Boolean(address
   && address.streetAddress?.trim() && address.city?.trim() && address.zipCode?.trim() && address.country?.trim());
@@ -141,7 +132,7 @@ export default function CatalogPage({ sponsors = [], userId, onOrderPlaced, onOr
       const matchesCategory = !category || productCategory === category;
       const searchableText = `${product.title || ''} ${product.description || ''} ${productCategory || ''}`.toLocaleLowerCase();
       const matchesSearch = !query || searchableText.includes(query);
-      const matchesFavorite = !favoritesOnly || favorites.has(product.productId);
+      const matchesFavorite = !favoritesOnly || favorites.has(String(product.productId));
       const matchesBalance = !affordableOnly || balance === null || Number(product.pointCost) <= balance;
       return matchesCategory && matchesSearch && matchesFavorite && matchesBalance;
     });
@@ -208,10 +199,12 @@ export default function CatalogPage({ sponsors = [], userId, onOrderPlaced, onOr
   const toggleFavorite = (productId) => {
     setFavorites((current) => {
       const updated = new Set(current);
-      if (updated.has(productId)) updated.delete(productId);
-      else updated.add(productId);
+      const normalizedId = String(productId);
+      if (updated.has(normalizedId)) updated.delete(normalizedId);
+      else updated.add(normalizedId);
       try {
-        localStorage.setItem(favoriteStorageKey(userId), JSON.stringify([...updated]));
+        const storedIds = [...updated].map((id) => Number.isNaN(Number(id)) ? id : Number(id));
+        localStorage.setItem(favoriteStorageKey(userId), JSON.stringify(storedIds));
       } catch {
         // Keep favorites usable in this view when browser storage is unavailable.
       }
@@ -506,7 +499,7 @@ export default function CatalogPage({ sponsors = [], userId, onOrderPlaced, onOr
                 <p className="catalog-result-count" aria-live="polite">{visibleProducts.length} of {products.length} items match</p>
                 <ul className="catalog-products" aria-label={`${activeSponsor.name} rewards`}>
                   {visibleProducts.map((product) => {
-                    const isFavorite = favorites.has(product.productId);
+                    const isFavorite = favorites.has(String(product.productId));
                     const isOverBudget = balance !== null && Number(product.pointCost) > balance;
                     return (
                       <li className="catalog-product" key={product.productId}>

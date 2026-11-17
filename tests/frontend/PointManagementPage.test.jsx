@@ -25,15 +25,16 @@ it('switches point rules between a driver’s sponsors', async () => {
   const roadrunnerTab = screen.getByRole('tab', { name: 'Roadrunner Logistics' });
 
   expect(acmeTab).toHaveAttribute('aria-selected', 'true');
-  expect(screen.getByDisplayValue('Safe driving bonus')).toBeInTheDocument();
-  expect(screen.queryByDisplayValue('On-time delivery')).not.toBeInTheDocument();
+  expect(screen.getByText('Safe driving bonus')).toBeInTheDocument();
+  expect(screen.queryByText('On-time delivery')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Add another rule|Edit|Delete/ })).not.toBeInTheDocument();
 
   fireEvent.click(roadrunnerTab);
 
   expect(roadrunnerTab).toHaveAttribute('aria-selected', 'true');
   expect(acmeTab).toHaveAttribute('aria-selected', 'false');
-  expect(screen.getByDisplayValue('On-time delivery')).toBeInTheDocument();
-  expect(screen.queryByDisplayValue('Safe driving bonus')).not.toBeInTheDocument();
+  expect(screen.getByText('On-time delivery')).toBeInTheDocument();
+  expect(screen.queryByText('Safe driving bonus')).not.toBeInTheDocument();
   expect(tablist).toHaveAttribute('role', 'tablist');
 });
 

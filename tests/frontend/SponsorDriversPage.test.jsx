@@ -69,7 +69,7 @@ it('opens and closes a read-only application view for an individual driver', asy
   render(<SponsorDriversPage />);
 
   const table = await screen.findByRole('table');
-  fireEvent.click(within(table).getAllByRole('button', { name: 'Adjust Points' })[0]);
+  fireEvent.click(within(table).getAllByRole('button', { name: 'Edit Driver' })[0]);
 
   const application = screen.getByRole('region', { name: 'Driver application' });
   expect(within(application).getByRole('heading', { name: 'Alex Racer' })).toBeInTheDocument();
@@ -80,6 +80,38 @@ it('opens and closes a read-only application view for an individual driver', asy
 
   fireEvent.click(within(application).getByRole('button', { name: 'Close Panel' }));
   expect(screen.queryByRole('region', { name: 'Driver application' })).not.toBeInTheDocument();
+});
+
+it('shows driver catalog redemptions and removes the driver with a recorded reason', async () => {
+  const fetchMock = vi.fn(async (url, options = {}) => {
+    if (url === '/api/sponsor-rules') return { ok: true, json: async () => ({ rules: [] }) };
+    if (url === '/api/sponsor/drivers') return { ok: true, json: async () => ({ sponsorLinked: true, drivers }) };
+    if (url === '/api/sponsor/drivers/1/orders') return { ok: true, json: async () => ({ orders: [
+      { orderId: 31, productTitle: 'Hard Drive', pointCost: 6400, status: 'pending', createdAt: '2026-11-05T12:00:00Z' },
+    ] }) };
+    if (url === '/api/sponsor/drivers/1/drop') return { ok: true, json: async () => ({ message: 'Driver removed from your organization.' }) };
+    return { ok: true, json: async () => ({ sponsorLinked: true, drivers }) };
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  render(<SponsorDriversPage user={{ sponsorId: 10 }} />);
+
+  const table = await screen.findByRole('table');
+  const driverRow = within(table).getByRole('row', { name: /Dana Driver/ });
+  fireEvent.click(within(driverRow).getByRole('button', { name: 'Edit Driver' }));
+
+  const redemptions = await screen.findByRole('region', { name: 'Driver catalog redemptions' });
+  expect(within(redemptions).getByText('Hard Drive')).toBeInTheDocument();
+  expect(within(redemptions).getByText('6,400')).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText('Reason for removal'), { target: { value: 'Repeated policy violations' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Remove driver' }));
+
+  expect(await screen.findByRole('status')).toHaveTextContent('Driver removed from your organization.');
+  expect(fetchMock).toHaveBeenCalledWith('/api/sponsor/drivers/1/drop', expect.objectContaining({
+    method: 'POST',
+    body: JSON.stringify({ reason: 'Repeated policy violations' }),
+  }));
 });
 
 it('shows point history for the selected driver on request', async () => {
@@ -96,7 +128,7 @@ it('shows point history for the selected driver on request', async () => {
   render(<SponsorDriversPage />);
 
   const table = await screen.findByRole('table');
-  fireEvent.click(within(table).getAllByRole('button', { name: 'Adjust Points' })[0]);
+  fireEvent.click(within(table).getAllByRole('button', { name: 'Edit Driver' })[0]);
   fireEvent.click(within(screen.getByRole('region', { name: 'Driver application' }))
     .getByRole('button', { name: 'Show point history' }));
 
@@ -123,7 +155,7 @@ it('lets a sponsor report a selected driver point change', async () => {
   render(<SponsorDriversPage user={{ sponsorId: 10 }} />);
 
   const table = await screen.findByRole('table');
-  fireEvent.click(within(table).getAllByRole('button', { name: 'Adjust Points' })[0]);
+  fireEvent.click(within(table).getAllByRole('button', { name: 'Edit Driver' })[0]);
   fireEvent.click(within(screen.getByRole('region', { name: 'Driver application' }))
     .getByRole('button', { name: 'Show point history' }));
 
@@ -156,11 +188,11 @@ it('explains when the point changes API returns HTML instead of JSON', async () 
   render(<SponsorDriversPage user={{ sponsorId: 10 }} />);
 
   const table = await screen.findByRole('table');
-  fireEvent.click(within(table).getAllByRole('button', { name: 'Adjust Points' })[0]);
+  fireEvent.click(within(table).getAllByRole('button', { name: 'Edit Driver' })[0]);
   fireEvent.click(within(screen.getByRole('region', { name: 'Driver application' }))
     .getByRole('button', { name: 'Show point history' }));
 
-  expect(await screen.findByRole('alert')).toHaveTextContent(
+  expect(await within(screen.getByRole('region', { name: 'Recent point changes' })).findByRole('alert')).toHaveTextContent(
     'The point changes API returned a non-JSON response. Restart the backend or deploy the latest API version.',
   );
 });
@@ -182,7 +214,7 @@ it('loads this sponsor’s point rules and updates a driver balance after an adj
   render(<SponsorDriversPage user={{ sponsorId: 10 }} />);
 
   const table = await screen.findByRole('table');
-  fireEvent.click(within(table).getAllByRole('button', { name: 'Adjust Points' })[0]);
+  fireEvent.click(within(table).getAllByRole('button', { name: 'Edit Driver' })[0]);
 
   fireEvent.change(await screen.findByLabelText('Point rule'), { target: { value: '7' } });
   expect(screen.queryByRole('option', { name: 'Another sponsor rule (+500 pts)' })).not.toBeInTheDocument();

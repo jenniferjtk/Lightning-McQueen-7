@@ -45,6 +45,8 @@ describe('sponsor driver list', () => {
     expect(listQuery[1]).toEqual([users.sponsor.sponsor_id]);
     expect(listQuery[0]).toContain("a.status = 'approved'");
     expect(listQuery[0]).toContain('point_audit_log');
+    expect(listQuery[0]).toContain('points.sponsor_id = a.sponsor_id');
+    expect(listQuery[0]).toContain('spent.sponsor_id = a.sponsor_id');
     expect(listQuery[0]).toContain('a.application_id AS applicationId');
     expect(listQuery[0]).toContain('a.submitted_at AS submittedAt');
   });
@@ -156,6 +158,78 @@ describe('sponsor driver point entries', () => {
     await agent.get('/api/sponsor/drivers/4/points/entries')
       .expect(403, { message: 'This driver is not in your sponsor program.' });
     expect(db.execute).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('sponsor driver redemption history', () => {
+  it('lists orders only for an approved driver in the sponsor organization', async () => {
+    const agent = await signIn(app, users.sponsor);
+    db.execute.mockClear();
+    const redemption = {
+      order_id: 51, sponsor_id: users.sponsor.sponsor_id, sponsor_name: 'Acme Trucking', product_id: 9,
+      product_title: 'Hard Drive', unit_price: '64.00', point_cost: 6400, status: 'pending', created_at: '2026-11-15T12:00:00Z',
+    };
+    mockQueries([
+      roleLookup,
+      ['FROM driver_applications WHERE driver_user_id = ?', [{ application_id: 44 }]],
+      ['FROM orders o', [redemption]],
+    ]);
+
+    const response = await agent.get('/api/sponsor/drivers/1/orders').expect(200);
+    expect(response.body.orders).toEqual([{
+      orderId: 51, sponsorId: users.sponsor.sponsor_id, sponsorName: 'Acme Trucking', productId: 9,
+      productTitle: 'Hard Drive', unitPrice: 64, pointCost: 6400, status: 'pending', createdAt: redemption.created_at,
+      estimatedDelivery: '2026-11-20',
+    }]);
+    expect(db.execute.mock.calls.at(-1)[1]).toEqual([users.driver.user_id, users.sponsor.sponsor_id]);
+  });
+
+  it('does not expose orders for drivers outside the sponsor organization', async () => {
+    const agent = await signIn(app, users.sponsor);
+    db.execute.mockClear();
+    mockQueries([roleLookup, ['FROM driver_applications WHERE driver_user_id = ?', []]]);
+
+    await agent.get('/api/sponsor/drivers/4/orders').expect(403);
+    expect(db.execute).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('sponsor driver removal', () => {
+  it('requires a reason and removes only an approved driver in this sponsor program', async () => {
+    const agent = await signIn(app, users.sponsor);
+    db.execute.mockClear();
+    mockQueries([
+      roleLookup,
+      ['SELECT application_id FROM driver_applications', [{ application_id: 44 }]],
+      ['UPDATE driver_applications SET status', { affectedRows: 1 }],
+      ['INSERT INTO sponsor_driver_removals', { insertId: 12 }],
+      ['INSERT INTO driver_notifications', { insertId: 13 }],
+    ]);
+
+    await agent.post('/api/sponsor/drivers/1/drop').send({ reason: '  Repeated policy violations  ' }).expect(200, {
+      message: 'Driver removed from your organization.',
+    });
+    expect(db.execute.mock.calls.find(([sql]) => sql.includes('INSERT INTO sponsor_driver_removals'))[1])
+      .toEqual([users.driver.user_id, users.sponsor.sponsor_id, users.sponsor.user_id, 'Repeated policy violations']);
+    expect(db.execute.mock.calls.find(([sql]) => sql.includes('INSERT INTO driver_notifications'))[1])
+      .toEqual([users.driver.user_id, users.sponsor.sponsor_id]);
+    expect(db.commit).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a blank reason and does not change application status', async () => {
+    const agent = await signIn(app, users.sponsor);
+    db.execute.mockClear();
+    mockQueries([roleLookup]);
+
+    await agent.post('/api/sponsor/drivers/1/drop').send({ reason: '   ' }).expect(400);
+    expect(db.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('is sponsor-only', async () => {
+    const driverAgent = await signIn(app, users.driver);
+    db.execute.mockClear();
+    mockQueries([roleLookup]);
+    await driverAgent.post('/api/sponsor/drivers/1/drop').send({ reason: 'Reason' }).expect(403);
   });
 });
 

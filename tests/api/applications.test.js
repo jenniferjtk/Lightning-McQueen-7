@@ -95,6 +95,7 @@ describe('sponsor decisions', () => {
       roleLookup,
       ['FROM driver_applications WHERE application_id = ?', [{ sponsor_id: 10, driver_user_id: 1, status: 'pending' }]],
       ['UPDATE driver_applications', { affectedRows: 1 }],
+      ['INSERT INTO driver_notifications', { insertId: 1 }],
     ]);
 
     const res = await agent.patch('/api/applications/5/decide')
@@ -102,6 +103,7 @@ describe('sponsor decisions', () => {
       .expect(200);
 
     expect(res.body).toEqual({ application_id: 5, status: 'approved' });
+    expect(db.execute).toHaveBeenCalledWith(expect.stringContaining("'application_approved'"), [users.driver.user_id, 10]);
     const [query, params] = db.execute.mock.calls.find(([sql]) => sql.includes('UPDATE driver_applications'));
     expect(query).toContain('decided_at = NOW()');
     expect(query).not.toContain('decision_reason');

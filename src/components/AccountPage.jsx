@@ -382,7 +382,16 @@ export default function AccountPage({ user, sponsors = [], points = 0, onProfile
           >
             <h2>Points balance</h2>
             <p className="account-points__value" aria-label="Points balance">{Number(points || 0).toLocaleString()} <span>pts</span></p>
-            <p className="account-points__message">Your current earned balance across sponsors.</p>
+            {sponsors.length > 0 ? (
+              <ul className="account-points__sponsors" aria-label="Points by sponsor">
+                {sponsors.map((sponsor) => (
+                  <li key={sponsor.id}>
+                    <span>{sponsor.name}</span>
+                    <strong>{Number(sponsor.points || 0).toLocaleString()} pts</strong>
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="account-points__message">No approved sponsor balances yet.</p>}
           </section>}
 
           {isSponsor && <section

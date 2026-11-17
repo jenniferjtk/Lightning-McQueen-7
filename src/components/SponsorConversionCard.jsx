@@ -6,8 +6,9 @@ const formatRate = (rate) => new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 4,
 }).format(Number(rate));
 
-export default function SponsorConversionCard({ userRole }) {
+export default function SponsorConversionCard({ userRole, sponsors = [], selectedSponsorId, onSponsorChange }) {
   const isSponsor = userRole === 'sponsor';
+  const isDriver = userRole === 'driver';
   const [sponsorName, setSponsorName] = useState('');
   const [rate, setRate] = useState(null);
   const [draftRate, setDraftRate] = useState('');
@@ -18,7 +19,11 @@ export default function SponsorConversionCard({ userRole }) {
   const [message, setMessage] = useState('');
 
   useEffect(() => {
-    const endpoint = isSponsor ? '/api/sponsor/conversion' : '/api/driver/conversion';
+    if (isDriver) {
+      setLoading(false);
+      return undefined;
+    }
+    const endpoint = '/api/sponsor/conversion';
     fetch(endpoint, { credentials: 'include' })
       .then(async (response) => {
         const data = await response.json();
@@ -32,7 +37,11 @@ export default function SponsorConversionCard({ userRole }) {
       })
       .catch((requestError) => setError(requestError.message))
       .finally(() => setLoading(false));
-  }, [isSponsor]);
+  }, [isDriver]);
+
+  const selectedConversion = sponsors.find((entry) => Number(entry.id) === Number(selectedSponsorId)) || sponsors[0];
+  const displayedRate = isDriver ? selectedConversion?.pointConversionRate ?? null : rate;
+  const displayedSponsorName = isDriver ? selectedConversion?.name || '' : sponsorName;
 
   const saveRate = async (event) => {
     event.preventDefault();
@@ -65,7 +74,7 @@ export default function SponsorConversionCard({ userRole }) {
       <div className="sponsor-conversion-card__header">
         <div>
           <h2 className="card__title" id="sponsor-conversion-title">Point value</h2>
-          {sponsorName && <p className="sponsor-conversion-card__sponsor">{sponsorName}</p>}
+          {displayedSponsorName && <p className="sponsor-conversion-card__sponsor">{displayedSponsorName}</p>}
         </div>
         {isSponsor && !loading && rate !== null && !editing && (
           <button className="sponsor-conversion-card__edit" type="button" onClick={() => { setEditing(true); setMessage(''); }}>
@@ -78,7 +87,7 @@ export default function SponsorConversionCard({ userRole }) {
         <p className="sponsor-conversion-card__state">Loading point value...</p>
       ) : error ? (
         <p className="sponsor-conversion-card__state sponsor-conversion-card__state--error" role="alert">{error}</p>
-      ) : rate === null ? (
+      ) : displayedRate === null ? (
         <p className="sponsor-conversion-card__state">No approved sponsor conversion is available yet.</p>
       ) : editing ? (
         <form className="sponsor-conversion-card__form" onSubmit={saveRate}>
@@ -105,7 +114,24 @@ export default function SponsorConversionCard({ userRole }) {
           </div>
         </form>
       ) : (
-        <p className="sponsor-conversion-card__rate"><strong>1 point</strong><span>=</span><strong>{formatRate(rate)}</strong><span>USD</span></p>
+        <>
+          {isDriver && sponsors.length > 1 && (
+            <div className="sponsor-conversion-card__tabs" role="tablist" aria-label="Point value by sponsor">
+              {sponsors.map((sponsor) => (
+                <button
+                  key={sponsor.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={Number(selectedConversion?.id) === Number(sponsor.id)}
+                  onClick={() => onSponsorChange?.(sponsor.id)}
+                >
+                  {sponsor.name}
+                </button>
+              ))}
+            </div>
+          )}
+          <p className="sponsor-conversion-card__rate"><strong>1 point</strong><span>=</span><strong>{formatRate(displayedRate)}</strong><span>USD</span></p>
+        </>
       )}
       {message && <p className="sponsor-conversion-card__state" role="status">{message}</p>}
     </section>
