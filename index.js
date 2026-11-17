@@ -437,16 +437,34 @@ app.put('/api/admin/drivers/:driverId/affiliation', requireAdmin, async (req, re
     const updateParams = selectedApplicationId === null
       ? [driverId]
       : [driverId, selectedApplicationId];
+    const [removedApplications] = await connection.execute(
+      `SELECT application_id, sponsor_id FROM driver_applications
+       WHERE driver_user_id = ? AND status = 'approved'${selectedApplicationId === null ? '' : ' AND application_id <> ?'}
+       FOR UPDATE`,
+      updateParams,
+    );
     await connection.execute(
       `UPDATE driver_applications
        SET status = 'rejected', decided_at = NOW()
        WHERE driver_user_id = ? AND status = 'approved'${selectedApplicationId === null ? '' : ' AND application_id <> ?'}`,
       updateParams,
     );
+    for (const application of removedApplications) {
+      await connection.execute(
+        `INSERT INTO driver_notifications (driver_user_id, sponsor_id, notification_type)
+         VALUES (?, ?, 'sponsor_dropped')`,
+        [driverId, application.sponsor_id],
+      );
+    }
 
     if (sponsorId !== null && selectedApplicationId === null) {
       await connection.execute(
         "INSERT INTO driver_applications (driver_user_id, sponsor_id, status, decided_at) VALUES (?, ?, 'approved', NOW())",
+        [driverId, sponsorId],
+      );
+      await connection.execute(
+        `INSERT INTO driver_notifications (driver_user_id, sponsor_id, notification_type)
+         VALUES (?, ?, 'application_approved')`,
         [driverId, sponsorId],
       );
     }
@@ -501,19 +519,20 @@ app.get('/api/driver/conversion', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
   try {
     const [rows] = await pool.execute(
-      `SELECT s.name AS sponsor_name, s.point_conversion_rate
+      `SELECT s.sponsor_id AS sponsor_id, s.name AS sponsor_name, s.point_conversion_rate
        FROM users u
        JOIN driver_applications a ON a.driver_user_id = u.user_id AND a.status = 'approved'
        JOIN sponsors s ON s.sponsor_id = a.sponsor_id
        WHERE u.user_id = ? AND u.role = 'driver'
-       ORDER BY COALESCE(a.decided_at, a.submitted_at) DESC, a.application_id DESC
-       LIMIT 1`,
+       ORDER BY COALESCE(a.decided_at, a.submitted_at) DESC, a.application_id DESC`,
       [req.session.userId],
     );
-    return res.json({
-      sponsorName: rows[0]?.sponsor_name || null,
-      pointConversionRate: rows[0]?.point_conversion_rate ?? null,
-    });
+    const conversions = rows.map((row) => ({
+      sponsorId: Number(row.sponsor_id),
+      sponsorName: row.sponsor_name,
+      pointConversionRate: row.point_conversion_rate == null ? null : Number(row.point_conversion_rate),
+    }));
+    return res.json({ conversions });
   } catch (error) {
     console.error('Driver conversion lookup failed:', error.message);
     return res.status(500).json({ message: 'Unable to load the point value.' });
@@ -785,17 +804,17 @@ app.get('/api/sponsor/drivers', async (req, res) => {
        JOIN users u ON u.user_id = a.driver_user_id
        JOIN sponsors s ON s.sponsor_id = a.sponsor_id
        LEFT JOIN (
-         SELECT l.affected_user_id, SUM(r.pt_value) AS total
+         SELECT l.affected_user_id, r.sponsor_id, SUM(r.pt_value) AS total
          FROM point_audit_log l
          JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
-         GROUP BY l.affected_user_id
-       ) points ON points.affected_user_id = u.user_id
+         GROUP BY l.affected_user_id, r.sponsor_id
+       ) points ON points.affected_user_id = u.user_id AND points.sponsor_id = a.sponsor_id
        LEFT JOIN (
-         SELECT driver_user_id, SUM(point_cost) AS total
+         SELECT driver_user_id, sponsor_id, SUM(point_cost) AS total
          FROM orders
          WHERE status <> 'canceled'
-         GROUP BY driver_user_id
-       ) spent ON spent.driver_user_id = u.user_id
+         GROUP BY driver_user_id, sponsor_id
+       ) spent ON spent.driver_user_id = u.user_id AND spent.sponsor_id = a.sponsor_id
        WHERE a.sponsor_id = ? AND a.status = 'approved' AND u.role = 'driver'
        ORDER BY u.last_name, u.first_name, u.user_id`,
       [sponsorUser.sponsor_id],
@@ -1050,7 +1069,7 @@ app.patch('/api/applications/:applicationId/decide', requireRole('sponsor'), asy
 
   try {
     const [rows] = await pool.execute(
-      'SELECT sponsor_id, status FROM driver_applications WHERE application_id = ?',
+      'SELECT driver_user_id, sponsor_id, status FROM driver_applications WHERE application_id = ?',
       [req.params.applicationId],
     );
     if (!rows[0]) return res.status(404).json({ message: 'No application found with that id.' });
@@ -1068,6 +1087,13 @@ app.patch('/api/applications/:applicationId/decide', requireRole('sponsor'), asy
       [decision, req.params.applicationId],
     );
     if (result.affectedRows === 0) return res.status(409).json({ message: 'Application is no longer pending.' });
+    if (decision === 'approved') {
+      await pool.execute(
+        `INSERT INTO driver_notifications (driver_user_id, sponsor_id, notification_type)
+         VALUES (?, ?, 'application_approved')`,
+        [rows[0].driver_user_id, rows[0].sponsor_id],
+      );
+    }
     return res.json({ application_id: Number(req.params.applicationId), status: decision });
   } catch (error) {
     console.error('Application decision failed:', error.message);
@@ -1187,6 +1213,86 @@ app.get('/api/sponsor/drivers/:driverUserId/points/entries', requireRole('sponso
   } catch (error) {
     console.error('Sponsor driver point entries lookup failed:', error.message);
     return res.status(500).json({ message: 'Unable to load point changes.' });
+  }
+});
+
+app.get('/api/sponsor/drivers/:driverUserId/orders', requireRole('sponsor'), async (req, res) => {
+  const driverUserId = parseId(req.params.driverUserId);
+  if (!driverUserId) return res.status(400).json({ message: 'Invalid driver account.' });
+  try {
+    const [approved] = await pool.execute(
+      "SELECT application_id FROM driver_applications WHERE driver_user_id = ? AND sponsor_id = ? AND status = 'approved'",
+      [driverUserId, req.currentUser.sponsor_id],
+    );
+    if (!approved[0]) return res.status(403).json({ message: 'This driver is not in your sponsor program.' });
+    const [rows] = await pool.execute(
+      `SELECT o.order_id, o.sponsor_id, s.name AS sponsor_name, o.product_id, o.product_title,
+              o.unit_price, o.point_cost, o.status, o.created_at
+       FROM orders o
+       JOIN sponsors s ON s.sponsor_id = o.sponsor_id
+       WHERE o.driver_user_id = ? AND o.sponsor_id = ?
+       ORDER BY o.created_at DESC, o.order_id DESC
+       LIMIT 50`,
+      [driverUserId, req.currentUser.sponsor_id],
+    );
+    return res.json({ orders: rows.map(orderSummary) });
+  } catch (error) {
+    console.error('Sponsor driver order lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load this driver’s redemptions.' });
+  }
+});
+
+app.post('/api/sponsor/drivers/:driverUserId/drop', requireRole('sponsor'), async (req, res) => {
+  const driverUserId = parseId(req.params.driverUserId);
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+  if (!driverUserId) return res.status(400).json({ message: 'Invalid driver account.' });
+  if (!reason || reason.length > 1000) {
+    return res.status(400).json({ message: 'Provide a reason of 1 to 1000 characters.' });
+  }
+
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [applications] = await connection.execute(
+      `SELECT application_id FROM driver_applications
+       WHERE driver_user_id = ? AND sponsor_id = ? AND status = 'approved'
+       ORDER BY COALESCE(decided_at, submitted_at) DESC, application_id DESC
+       LIMIT 1 FOR UPDATE`,
+      [driverUserId, req.currentUser.sponsor_id],
+    );
+    if (!applications[0]) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'No approved driver was found in your organization.' });
+    }
+    const [updated] = await connection.execute(
+      "UPDATE driver_applications SET status = 'rejected', decided_at = NOW() WHERE application_id = ? AND status = 'approved'",
+      [applications[0].application_id],
+    );
+    if (!updated.affectedRows) {
+      await connection.rollback();
+      return res.status(409).json({ message: 'This driver is no longer active in your organization.' });
+    }
+    await connection.execute(
+      `INSERT INTO sponsor_driver_removals (driver_user_id, sponsor_id, removed_by, reason)
+       VALUES (?, ?, ?, ?)`,
+      [driverUserId, req.currentUser.sponsor_id, req.currentUser.user_id, reason],
+    );
+    await connection.execute(
+      `INSERT INTO driver_notifications (driver_user_id, sponsor_id, notification_type)
+       VALUES (?, ?, 'sponsor_dropped')`,
+      [driverUserId, req.currentUser.sponsor_id],
+    );
+    await connection.commit();
+    return res.json({ message: 'Driver removed from your organization.' });
+  } catch (error) {
+    if (connection) {
+      try { await connection.rollback(); } catch { /* Preserve the original failure. */ }
+    }
+    console.error('Sponsor driver removal failed:', error.message);
+    return res.status(500).json({ message: 'Unable to remove this driver.' });
+  } finally {
+    connection?.release();
   }
 });
 
@@ -1509,29 +1615,27 @@ app.get('/api/driver', async (req, res) => {
     if (!users[0]) return res.status(401).json({ message: 'Session expired.' });
 
     const [sponsors] = await pool.execute(
-      `SELECT s.sponsor_id AS id, s.name
+      `SELECT s.sponsor_id AS id, s.name, s.point_conversion_rate AS pointConversionRate,
+              (SELECT COALESCE(SUM(r.pt_value), 0)
+               FROM point_audit_log l
+               JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+               WHERE l.affected_user_id = ? AND r.sponsor_id = s.sponsor_id)
+              - (SELECT COALESCE(SUM(o.point_cost), 0)
+                 FROM orders o
+                 WHERE o.driver_user_id = ? AND o.sponsor_id = s.sponsor_id AND o.status <> 'canceled') AS points
        FROM driver_applications a
        JOIN sponsors s ON s.sponsor_id = a.sponsor_id
        WHERE a.driver_user_id = ? AND a.status = 'approved'
        ORDER BY a.decided_at DESC`,
-      [req.session.userId],
+      [req.session.userId, req.session.userId, req.session.userId],
     );
 
-    const [[balance]] = await pool.execute(
-      `SELECT (SELECT COALESCE(SUM(r.pt_value), 0)
-               FROM point_audit_log l
-               JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
-               WHERE l.affected_user_id = ?)
-            - (SELECT COALESCE(SUM(o.point_cost), 0)
-               FROM orders o
-               WHERE o.driver_user_id = ? AND o.status <> 'canceled') AS points`,
-      [req.session.userId, req.session.userId],
-    );
     const [recent] = await pool.execute(
       `SELECT l.log_id, COALESCE(NULLIF(l.comment, ''), r.description) AS description,
-              r.pt_value, DATE_FORMAT(l.timestamp, '%b %e, %Y') AS date
+              r.pt_value, s.name AS sponsor_name, DATE_FORMAT(l.timestamp, '%b %e, %Y') AS date
        FROM point_audit_log l
        JOIN sponsor_rules r ON r.rule_id = l.sponsor_rule_id
+       JOIN sponsors s ON s.sponsor_id = r.sponsor_id
        WHERE l.affected_user_id = ?
        ORDER BY l.timestamp DESC, l.log_id DESC
        LIMIT 5`,
@@ -1541,6 +1645,7 @@ app.get('/api/driver', async (req, res) => {
     const balanceNotifications = recent.map((entry) => ({
       id: entry.log_id,
       label: entry.description || 'Unspecified',
+      sponsorName: entry.sponsor_name,
       date: entry.date,
       amount: Number(entry.pt_value),
     }));
@@ -1550,14 +1655,52 @@ app.get('/api/driver', async (req, res) => {
       name: `${users[0].first_name} ${users[0].last_name}`.trim(),
       dateJoined: users[0].created_at,
       sponsorName: sponsors.map((sponsor) => sponsor.name).join(', '),
-      sponsors,
-      points: Number(balance?.points || 0),
+      sponsors: sponsors.map((sponsor) => ({
+        ...sponsor,
+        points: Number(sponsor.points || 0),
+        pointConversionRate: sponsor.pointConversionRate == null ? null : Number(sponsor.pointConversionRate),
+      })),
+      points: sponsors.reduce((total, sponsor) => total + Number(sponsor.points || 0), 0),
       balanceNotifications,
       recentPurchases: [],
     });
   } catch (error) {
     console.error('Driver dashboard lookup failed:', error.message);
     return res.status(500).json({ message: 'Unable to load your dashboard.' });
+  }
+});
+
+app.get('/api/driver/notifications', requireRole('driver'), async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT n.notification_id AS id, n.notification_type AS type, n.created_at AS createdAt,
+              s.name AS sponsorName
+       FROM driver_notifications n
+       JOIN sponsors s ON s.sponsor_id = n.sponsor_id
+       WHERE n.driver_user_id = ? AND n.read_at IS NULL
+       ORDER BY n.created_at DESC, n.notification_id DESC`,
+      [req.currentUser.user_id],
+    );
+    return res.json({ notifications: rows });
+  } catch (error) {
+    console.error('Driver notification lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load your notifications.' });
+  }
+});
+
+app.patch('/api/driver/notifications/:notificationId/read', requireRole('driver'), async (req, res) => {
+  const notificationId = parseId(req.params.notificationId);
+  if (!notificationId) return res.status(400).json({ message: 'Invalid notification.' });
+  try {
+    const [result] = await pool.execute(
+      'UPDATE driver_notifications SET read_at = NOW() WHERE notification_id = ? AND driver_user_id = ? AND read_at IS NULL',
+      [notificationId, req.currentUser.user_id],
+    );
+    if (!result.affectedRows) return res.status(404).json({ message: 'Notification not found.' });
+    return res.status(204).end();
+  } catch (error) {
+    console.error('Driver notification update failed:', error.message);
+    return res.status(500).json({ message: 'Unable to update your notification.' });
   }
 });
 

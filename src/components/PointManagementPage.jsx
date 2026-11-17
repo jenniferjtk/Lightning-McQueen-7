@@ -21,6 +21,7 @@ export default function PointManagementPage({ user, sponsors = [], readOnly = fa
   const canManage = !readOnly && (user?.role === 'admin' || user?.role === 'sponsor');
   const isSponsor = user?.role === 'sponsor';
   const isDriver = user?.role === 'driver';
+  const activeSponsor = sponsors.find((sponsor) => Number(sponsor.id) === Number(activeSponsorId));
 
   useEffect(() => {
     if (!sponsors.some((sponsor) => Number(sponsor.id) === Number(activeSponsorId))) {
@@ -115,12 +116,17 @@ export default function PointManagementPage({ user, sponsors = [], readOnly = fa
   return (
     <main className="point-management-page">
       <section className="point-management-page__intro">
-        <p className="point-management-page__eyebrow">{readOnly ? 'Preview point management' : 'Point management'}</p>
-        <h1>{readOnly ? 'Point rules preview.' : 'Add or remove points.'}</h1>
-        <p>{readOnly ? 'The authenticated administrator is viewing these rules without making changes.' : 'Record the reason for each point adjustment and choose whether it happens once or repeats.'}</p>
+        <p className="point-management-page__eyebrow">{isDriver ? 'Point rules' : readOnly ? 'Preview point management' : 'Point management'}</p>
+        <h1>{isDriver ? 'Your point rules.' : readOnly ? 'Point rules preview.' : 'Add or remove points.'}</h1>
+        <p>{isDriver
+          ? 'Review the point-award rules for each sponsor organization.'
+          : readOnly
+            ? 'The authenticated administrator is viewing these rules without making changes.'
+            : 'Record the reason for each point adjustment and choose whether it happens once or repeats.'}</p>
       </section>
 
       <section className="point-entry" aria-label="Sponsor point rules">
+        {isDriver && activeSponsor && <h2 className="point-management__sponsor-heading">{activeSponsor.name} rules</h2>}
         {isDriver && sponsors.length > 1 && (
           <div className="point-management-sponsor-tabs" role="tablist" aria-label="Choose sponsor point rules">
             {sponsors.map((sponsor) => (
@@ -146,16 +152,31 @@ export default function PointManagementPage({ user, sponsors = [], readOnly = fa
           role={isDriver && sponsors.length > 1 ? 'tabpanel' : undefined}
           aria-labelledby={isDriver && sponsors.length > 1 ? `point-management-sponsor-tab-${activeSponsorId}` : undefined}
         >
-        <div className="point-entry__header" aria-hidden="true">
+        <div className={`point-entry__header${isDriver ? ' point-entry__header--driver' : ''}`} aria-hidden="true">
           <span>Points</span>
-          <span>Sponsor ID</span>
+          {!isDriver && <span>Sponsor ID</span>}
           <span>Description</span>
           <span>Frequency</span>
-          <span>Actions</span>
+          {!isDriver && <span>Actions</span>}
         </div>
 
         <div className="point-entry__rows">
-          {visibleRows.map((row, index) => (
+          {visibleRows.map((row, index) => (isDriver ? (
+            <div className="point-entry__row point-entry__row--readonly" key={row.rule_id ?? row.localId}>
+              <div>
+                <span className="point-entry__mobile-label">Points</span>
+                <strong>{Number(row.pt_value).toLocaleString()} pts</strong>
+              </div>
+              <div>
+                <span className="point-entry__mobile-label">Description</span>
+                <span>{row.description || 'No description'}</span>
+              </div>
+              <div>
+                <span className="point-entry__mobile-label">Frequency</span>
+                <span>{row.frequency === 'recurring' ? 'Recurring' : 'One-time'}</span>
+              </div>
+            </div>
+          ) : (
             <div className="point-entry__row" key={row.rule_id ?? row.localId}>
               <label>
                 <span className="point-entry__mobile-label">Points</span>
@@ -235,7 +256,7 @@ export default function PointManagementPage({ user, sponsors = [], readOnly = fa
                 )}
               </div>
             </div>
-          ))}
+          )))}
         </div>
 
         {loading && <p className="point-entry__state">Loading rules...</p>}

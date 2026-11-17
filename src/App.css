@@ -442,6 +442,79 @@ body {
   font-size: 0.82rem;
   color: #8C97A2;
 }
+.points-card__tabs,
+.sponsor-conversion-card__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.35rem 0 0.45rem;
+}
+.points-card__tabs button,
+.sponsor-conversion-card__tabs button {
+  background: #eef1f3;
+  border: 1px solid #d5dce1;
+  border-radius: 4px;
+  color: var(--color-asphalt);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.45rem 0.65rem;
+}
+.points-card__tabs button[aria-selected='true'],
+.sponsor-conversion-card__tabs button[aria-selected='true'] {
+  background: var(--color-steel);
+  border-color: var(--color-steel);
+  color: #fff;
+}
+.points-card__sponsor-balances,
+.account-points__sponsors {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+}
+.points-card__sponsor-balances li,
+.account-points__sponsors li {
+  align-items: baseline;
+  border-top: 1px solid var(--color-line);
+  display: flex;
+  font-size: 0.82rem;
+  gap: 0.5rem;
+  justify-content: space-between;
+  padding: 0.4rem 0;
+}
+.points-card__sponsor-balances strong,
+.account-points__sponsors strong {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+.points-activity-card__sponsor,
+.balance-notifications-card__sponsor {
+  color: var(--color-steel);
+  font-size: 0.76rem;
+  margin: 0.2rem 0 0;
+}
+.driver-notifications {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0 auto;
+  max-width: 1240px;
+  padding: 0.75rem 2rem 0;
+}
+.driver-notification {
+  align-items: center;
+  background: #eaf3ec;
+  border-left: 4px solid #267346;
+  color: var(--color-ink);
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  padding: 0.7rem 0.9rem;
+}
+.driver-notification--warning { background: #fff3e0; border-color: #b86116; }
+.driver-notification--restock { background: #eaf2f8; border-color: var(--color-steel); }
+.driver-notification p { margin: 0; }
+.driver-notification button { background: transparent; border: 1px solid currentColor; border-radius: 4px; color: inherit; cursor: pointer; flex: 0 0 auto; font: inherit; font-size: 0.78rem; font-weight: 700; padding: 0.4rem 0.6rem; }
 
 .sponsor-points-backlog__message {
   color: var(--color-slate);
@@ -681,6 +754,7 @@ body {
 .point-management-sponsor-tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1.25rem; }
 .point-management-sponsor-tabs__tab { background: #eef1f3; border: 1px solid #d5dce1; border-radius: 4px; color: var(--color-asphalt); cursor: pointer; font: inherit; font-weight: 700; padding: 0.65rem 0.9rem; }
 .point-management-sponsor-tabs__tab--active { background: var(--color-asphalt); border-color: var(--color-asphalt); color: white; }
+.point-management__sponsor-heading { margin: 0 0 1rem; font-size: 1.15rem; }
 .catalog-empty { align-items: center; background: #f5f7f8; border: 1px dashed #c7d0d7; display: flex; flex-direction: column; justify-content: center; min-height: 220px; padding: 2rem; text-align: center; }
 .catalog-empty__mark { align-items: center; background: #f2bd69; border-radius: 50%; color: var(--color-asphalt); display: flex; font-size: 1rem; font-weight: 800; height: 2.6rem; justify-content: center; margin-bottom: 0.7rem; width: 2.6rem; }
 .catalog-empty h3, .catalog-orders__empty h3 { color: var(--color-asphalt); font-size: 1rem; margin: 0; }
@@ -803,6 +877,8 @@ body {
 .catalog-detail__description { color: var(--color-ink); line-height: 1.6; margin: 1rem 0 0; }
 
 @media (max-width: 640px) {
+    .driver-notifications { padding-left: 1rem; padding-right: 1rem; }
+    .driver-notification { align-items: flex-start; }
   .catalog-page { padding: 1.5rem 1rem 3rem; }
   .catalog-detail__body { grid-template-columns: 1fr; gap: 1rem; }
   .catalog-detail__image { min-height: 220px; }
@@ -1415,6 +1491,11 @@ body {
   border-bottom: 1px solid var(--color-line);
 }
 
+.point-entry__header--driver,
+.point-entry__row--readonly {
+  grid-template-columns: 90px minmax(170px, 1fr) minmax(190px, 0.8fr);
+}
+
 .point-entry__row > label {
   display: flex;
   flex-direction: column;
@@ -1855,6 +1936,61 @@ body {
   margin: 0 0 0.75rem;
   font-size: 1rem;
 }
+
+.driver-management-page__notice {
+  background: #eaf3ec;
+  border-left: 3px solid #267346;
+  color: var(--color-ink);
+  margin: 0 0 1rem;
+  padding: 0.7rem 0.9rem;
+}
+
+.driver-management__redemptions,
+.driver-management__drop-form {
+  border-top: 1px solid var(--color-line);
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+}
+
+.driver-management__redemptions h3,
+.driver-management__drop-form h3 {
+  color: var(--color-asphalt);
+  font-size: 1rem;
+  margin: 0 0 0.7rem;
+}
+
+.driver-management__drop-form label {
+  color: var(--color-slate);
+  display: grid;
+  font-size: 0.82rem;
+  font-weight: 700;
+  gap: 0.4rem;
+  max-width: 700px;
+}
+
+.driver-management__drop-form textarea {
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  color: var(--color-ink);
+  font: inherit;
+  min-height: 88px;
+  padding: 0.65rem;
+  resize: vertical;
+}
+
+.driver-management__drop-button {
+  background: #922f25;
+  border: 0;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  margin-top: 0.7rem;
+  padding: 0.6rem 0.8rem;
+}
+
+.driver-management__drop-button:disabled { cursor: not-allowed; opacity: 0.55; }
 
 .driver-management__view-application {
   white-space: nowrap;

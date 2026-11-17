@@ -3,6 +3,7 @@ import Navbar from './components/Navbar.jsx';
 import ProfileCard from './components/ProfileCard.jsx';
 import PointsCard from './components/PointsCard.jsx';
 import PurchasesTable from './components/PurchasesTable.jsx';
+import SavedItemsPanel from './components/SavedItemsPanel.jsx';
 import AboutPage from './components/AboutPage.jsx';
 import AccountPage from './components/AccountPage.jsx';
 import PointManagementPage from './components/PointManagementPage.jsx';
@@ -22,6 +23,18 @@ import SponsorCatalogPage from './components/SponsorCatalogPage.jsx';
 import CatalogPage from './components/CatalogPage.jsx';
 import SponsorPointsBacklog from './components/SponsorPointsBacklog.jsx';
 
+const favoritesKey = (userId) => `driver-catalog-favorites-${userId}`;
+const stockSnapshotKey = (userId) => `driver-catalog-stock-snapshot-${userId}`;
+const restockNotificationsKey = (userId) => `driver-catalog-restock-notifications-${userId}`;
+
+function readLocalJson(key, fallback) {
+  try {
+    return JSON.parse(localStorage.getItem(key) || 'null') ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 const emptyDriver = {
   name: '',
   dateJoined: '',
@@ -40,6 +53,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('purchases');
   const [pendingCount, setPendingCount] = useState(0);
   const [driverData, setDriverData] = useState(null);
+  const [selectedDashboardSponsorId, setSelectedDashboardSponsorId] = useState(null);
+  const [driverNotifications, setDriverNotifications] = useState([]);
+  const [restockNotifications, setRestockNotifications] = useState([]);
   const [previewRole, setPreviewRole] = useState(null);
   const [currentPage, setCurrentPage] = useState(() => {
     const pathname = window.location.pathname;
@@ -100,6 +116,83 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
+    if (user?.role !== 'driver') {
+      setDriverNotifications([]);
+      setRestockNotifications([]);
+      return;
+    }
+    let active = true;
+    const loadNotifications = () => fetch('/api/driver/notifications', { credentials: 'include' })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.message || 'Unable to load notifications.');
+        if (active) setDriverNotifications(Array.isArray(data.notifications) ? data.notifications : []);
+      })
+      .catch(() => { if (active) setDriverNotifications([]); });
+    loadNotifications();
+    const timer = setInterval(loadNotifications, 30000);
+    setRestockNotifications(readLocalJson(restockNotificationsKey(user.id), []));
+    return () => { active = false; clearInterval(timer); };
+  }, [user]);
+
+  // Favorites are stored in this driver's browser. Poll each approved sponsor
+  // catalog and notify only on an observed zero-to-positive stock transition.
+  useEffect(() => {
+    if (user?.role !== 'driver' || !driverData?.sponsors?.length) return undefined;
+    let active = true;
+    const checkFavoriteStock = async () => {
+      const favoriteIds = new Set(readLocalJson(favoritesKey(user.id), []).map(String));
+      const snapshots = readLocalJson(stockSnapshotKey(user.id), {});
+      const nextSnapshots = { ...snapshots };
+      const newNotifications = [];
+
+      await Promise.all(driverData.sponsors.map(async (sponsor) => {
+        try {
+          const response = await fetch(`/api/sponsors/${sponsor.id}/catalog`, { credentials: 'include' });
+          if (!response.ok) return;
+          const data = await response.json();
+          for (const product of Array.isArray(data.products) ? data.products : []) {
+            if (!favoriteIds.has(String(product.productId))) continue;
+            const key = `${sponsor.id}:${product.productId}`;
+            const previousStock = nextSnapshots[key];
+            const currentStock = product.stockQuantity == null ? null : Number(product.stockQuantity);
+            if (previousStock === 0 && currentStock > 0) {
+              newNotifications.push({
+                id: `${key}:${Date.now()}`,
+                sponsorId: sponsor.id,
+                sponsorName: sponsor.name,
+                productId: product.productId,
+                productTitle: product.title,
+              });
+            }
+            nextSnapshots[key] = currentStock;
+          }
+        } catch {
+          // A temporary catalog outage should not interrupt dashboard use.
+        }
+      }));
+
+      if (!active) return;
+      try {
+        localStorage.setItem(stockSnapshotKey(user.id), JSON.stringify(nextSnapshots));
+        if (newNotifications.length) {
+          setRestockNotifications((current) => {
+            const updated = [...newNotifications, ...current].slice(0, 30);
+            localStorage.setItem(restockNotificationsKey(user.id), JSON.stringify(updated));
+            return updated;
+          });
+        }
+      } catch {
+        // Continue showing any notifications in memory if storage is unavailable.
+      }
+    };
+
+    checkFavoriteStock();
+    const timer = setInterval(checkFavoriteStock, 60000);
+    return () => { active = false; clearInterval(timer); };
+  }, [user, driverData?.sponsors]);
+
+  useEffect(() => {
     if (!user || user.role !== 'driver') {
       setDriverData(null);
       return;
@@ -109,28 +202,63 @@ export default function App() {
       .then(async (response) => (response.ok ? response.json() : null))
       .then(async (data) => {
         if (!data) return null;
-        let purchases = [];
-        try {
-          const response = await fetch('/api/orders', { credentials: 'include' });
-          const payload = response.ok ? await response.json() : {};
-          purchases = (Array.isArray(payload.orders) ? payload.orders : [])
-            .filter((order) => order.status !== 'canceled')
-            .map((order) => ({
-              id: order.orderId,
-              item: order.productTitle,
-              date: order.createdAt,
-              points: Number(order.pointCost),
-            }));
-        } catch {
-          purchases = [];
-        }
-        if (active) setDriverData({ ...data, recentPurchases: purchases });
+        const [orderResult, sponsorValues] = await Promise.all([
+          fetch('/api/orders', { credentials: 'include' })
+            .then(async (response) => (response.ok ? response.json() : {}))
+            .catch(() => ({})),
+          Promise.all((data.sponsors || []).map(async (sponsor) => {
+            try {
+              const response = await fetch(`/api/sponsors/${sponsor.id}/catalog`, { credentials: 'include' });
+              const catalog = response.ok ? await response.json() : {};
+              return {
+                ...sponsor,
+                points: catalog.pointBalance == null ? Number(sponsor.points || 0) : Number(catalog.pointBalance),
+                pointConversionRate: catalog.pointConversionRate == null
+                  ? sponsor.pointConversionRate
+                  : Number(catalog.pointConversionRate),
+              };
+            } catch {
+              return sponsor;
+            }
+          })),
+        ]);
+        const purchases = (Array.isArray(orderResult.orders) ? orderResult.orders : [])
+          .filter((order) => order.status !== 'canceled')
+          .map((order) => ({
+            id: order.orderId,
+            item: order.productTitle,
+            date: order.createdAt,
+            points: Number(order.pointCost),
+          }));
+        if (active) setDriverData({
+          ...data,
+          sponsors: sponsorValues,
+          points: sponsorValues.length
+            ? sponsorValues.reduce((total, sponsor) => total + Number(sponsor.points || 0), 0)
+            : Number(data.points || 0),
+          recentPurchases: purchases,
+        });
       })
       .catch(() => { if (active) setDriverData(null); })
     return () => { active = false; };
   }, [user]);
 
   const handlePendingCountChange = useCallback((count) => setPendingCount(count), []);
+
+  const dismissDriverNotification = async (notificationId) => {
+    const response = await fetch(`/api/driver/notifications/${notificationId}/read`, {
+      method: 'PATCH', credentials: 'include',
+    });
+    if (response.ok) setDriverNotifications((current) => current.filter((entry) => entry.id !== notificationId));
+  };
+
+  const dismissRestockNotification = (notificationId) => {
+    setRestockNotifications((current) => {
+      const updated = current.filter((entry) => entry.id !== notificationId);
+      try { localStorage.setItem(restockNotificationsKey(user.id), JSON.stringify(updated)); } catch {}
+      return updated;
+    });
+  };
 
   if (checkingSession) return <div className="state-screen">Checking your session...</div>;
   if (!user) return <AuthPage onAuthenticated={(authenticatedUser) => {
@@ -140,6 +268,9 @@ export default function App() {
 
   const previewUser = previewRole ? { ...user, role: previewRole } : user;
   const driver = { ...emptyDriver, ...driverData };
+  const dashboardSponsorId = driver.sponsors.some((sponsor) => Number(sponsor.id) === Number(selectedDashboardSponsorId))
+    ? selectedDashboardSponsorId
+    : driver.sponsors[0]?.id ?? null;
 
   const handleProfileUpdate = (updatedUser) => {
     setUser(updatedUser);
@@ -183,6 +314,25 @@ export default function App() {
         }}
       />
 
+      {user.role === 'driver' && (driverNotifications.length > 0 || restockNotifications.length > 0) && (
+        <section className="driver-notifications" aria-label="Driver notifications" aria-live="polite">
+          {driverNotifications.map((notification) => (
+            <div className={notification.type === 'sponsor_dropped' ? 'driver-notification driver-notification--warning' : 'driver-notification'} key={`application-${notification.id}`}>
+              <p>{notification.type === 'application_approved'
+                ? `Your application to ${notification.sponsorName} was approved.`
+                : `${notification.sponsorName} has ended your sponsor affiliation.`}</p>
+              <button type="button" aria-label="Dismiss notification" onClick={() => dismissDriverNotification(notification.id)}>Dismiss</button>
+            </div>
+          ))}
+          {restockNotifications.map((notification) => (
+            <div className="driver-notification driver-notification--restock" key={`restock-${notification.id}`}>
+              <p>{notification.productTitle} is back in stock at {notification.sponsorName}.</p>
+              <button type="button" aria-label="Dismiss restock notification" onClick={() => dismissRestockNotification(notification.id)}>Dismiss</button>
+            </div>
+          ))}
+        </section>
+      )}
+
       {visiblePage === 'admin' ? (
         <AdminHomePage
           user={user}
@@ -203,9 +353,9 @@ export default function App() {
       ) : visiblePage === 'about' ? (
         <AboutPage />
       ) : visiblePage === 'account' ? (
-        <AccountPage user={user} sponsors={driver.sponsors} points={driver.points} roleOverride={previewRole || null} readOnly={isPreview} onProfileUpdate={handleProfileUpdate} />
+          <AccountPage user={user} sponsors={driver.sponsors} points={driver.points} roleOverride={previewRole || null} readOnly={isPreview} onProfileUpdate={handleProfileUpdate} />
       ) : visiblePage === 'points' ? (
-        <PointManagementPage user={previewUser} readOnly={isPreview} />
+        <PointManagementPage user={previewUser} sponsors={driver.sponsors} readOnly={isPreview} />
       ) : visiblePage === 'reports' ? (
         <SponsorReportsPage user={previewUser} />
       ) : visiblePage === 'sponsors' ? (
@@ -217,11 +367,17 @@ export default function App() {
           onOrderPlaced={(order) => setDriverData((current) => (current ? {
             ...current,
             points: Number(current.points) - order.pointCost,
+            sponsors: current.sponsors.map((sponsor) => Number(sponsor.id) === Number(order.sponsorId)
+              ? { ...sponsor, points: Number(sponsor.points || 0) - order.pointCost }
+              : sponsor),
             recentPurchases: [{ id: order.orderId, item: order.productTitle, date: order.createdAt, points: Number(order.pointCost) }, ...current.recentPurchases],
           } : current))}
           onOrderCanceled={(order) => setDriverData((current) => (current ? {
             ...current,
             points: Number(current.points) + order.pointCost,
+            sponsors: current.sponsors.map((sponsor) => Number(sponsor.id) === Number(order.sponsorId)
+              ? { ...sponsor, points: Number(sponsor.points || 0) + order.pointCost }
+              : sponsor),
             recentPurchases: current.recentPurchases.filter((purchase) => purchase.id !== order.orderId),
           } : current))}
         />
@@ -243,8 +399,18 @@ export default function App() {
             ) : (
               <>
                 <div className="dashboard__points-column">
-                  <PointsCard points={driver.points} />
-                  <SponsorConversionCard userRole={user.role} />
+                  <PointsCard
+                    points={driver.points}
+                    sponsors={driver.sponsors}
+                    selectedSponsorId={dashboardSponsorId}
+                    onSponsorChange={setSelectedDashboardSponsorId}
+                  />
+                  <SponsorConversionCard
+                    userRole={user.role}
+                    sponsors={driver.sponsors}
+                    selectedSponsorId={dashboardSponsorId}
+                    onSponsorChange={setSelectedDashboardSponsorId}
+                  />
                   <section className="card points-activity-card">
                     <h2 className="card__title">Recent point updates</h2>
                     {driver.balanceNotifications.length === 0 ? (
@@ -255,6 +421,7 @@ export default function App() {
                           <li key={entry.id} className="points-activity-card__item">
                             <div>
                               <p className="points-activity-card__label">{entry.label}</p>
+                              {entry.sponsorName && <p className="points-activity-card__sponsor">{entry.sponsorName}</p>}
                               <p className="points-activity-card__date">{entry.date}</p>
                             </div>
                             <span className={entry.amount >= 0 ? 'points-activity-card__amount points-activity-card__amount--positive' : 'points-activity-card__amount points-activity-card__amount--negative'}>
@@ -288,6 +455,7 @@ export default function App() {
                           <li key={entry.id} className="balance-notifications-card__item">
                             <div>
                               <p className="balance-notifications-card__label">{entry.label}</p>
+                              {entry.sponsorName && <p className="balance-notifications-card__sponsor">{entry.sponsorName}</p>}
                               <p className="balance-notifications-card__date">{entry.date}</p>
                             </div>
                             <span className={entry.amount >= 0 ? 'balance-notifications-card__amount balance-notifications-card__amount--positive' : 'balance-notifications-card__amount balance-notifications-card__amount--negative'}>
@@ -313,7 +481,7 @@ export default function App() {
             </section>
           )}
 
-          <section className="dashboard__panel">
+          {user.role !== 'sponsor' && <section className="dashboard__panel">
             <div className="dashboard__tabs" aria-label="Dashboard sections">
               <button
                 type="button"
@@ -335,26 +503,9 @@ export default function App() {
             {activeTab === 'purchases' ? (
               <PurchasesTable purchases={driver.recentPurchases} />
             ) : (
-              <section className="card saved-items-card">
-                <h2 className="card__title">Saved Items</h2>
-                {driver.savedItems.length === 0 ? (
-                  <p className="purchases-card__empty">No saved items yet.</p>
-                ) : (
-                  <ul className="saved-items-list">
-                    {driver.savedItems.map((item) => (
-                      <li key={item.id} className="saved-items-list__item">
-                        <div>
-                          <p className="saved-items-list__name">{item.item}</p>
-                          <p className="saved-items-list__meta">Ready to redeem</p>
-                        </div>
-                        <span className="saved-items-list__points">{item.points.toLocaleString()} pts</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
+              <SavedItemsPanel sponsors={driver.sponsors} userId={user.id} />
             )}
-          </section>
+          </section>}
         </main>
       )}
     </div>

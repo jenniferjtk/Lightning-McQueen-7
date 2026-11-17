@@ -51,6 +51,7 @@ it('replaces other approved affiliations with an existing selected sponsor', asy
     roleLookup,
     ['SELECT sponsor_id FROM sponsors WHERE sponsor_id = ?', [{ sponsor_id: 11 }]],
     ['SELECT application_id FROM driver_applications', [{ application_id: 42 }]],
+    ['SELECT application_id, sponsor_id FROM driver_applications', []],
     ['UPDATE driver_applications', { affectedRows: 1 }],
   ]);
 
@@ -68,8 +69,10 @@ it('creates an approved affiliation when the selected sponsor is new', async () 
     roleLookup,
     ['SELECT sponsor_id FROM sponsors WHERE sponsor_id = ?', [{ sponsor_id: 11 }]],
     ['SELECT application_id FROM driver_applications', []],
+    ['SELECT application_id, sponsor_id FROM driver_applications', [{ application_id: 40, sponsor_id: 10 }]],
     ['UPDATE driver_applications', { affectedRows: 1 }],
     ['INSERT INTO driver_applications', { insertId: 51 }],
+    ['INSERT INTO driver_notifications', { insertId: 1 }],
   ]);
 
   await agent.put('/api/admin/drivers/1/affiliation').send({ sponsorId: 11 }).expect(200);
@@ -79,15 +82,23 @@ it('creates an approved affiliation when the selected sponsor is new', async () 
     [1, 11],
   );
   expect(db.commit).toHaveBeenCalledOnce();
+  expect(db.execute).toHaveBeenCalledWith(expect.stringContaining("'sponsor_dropped'"), [1, 10]);
+  expect(db.execute).toHaveBeenCalledWith(expect.stringContaining("'application_approved'"), [1, 11]);
 });
 
 it('clears all approved affiliations when no sponsor is selected', async () => {
   const agent = await signIn(app, users.admin);
-  mockQueries([roleLookup, ['UPDATE driver_applications', { affectedRows: 1 }]]);
+  mockQueries([
+    roleLookup,
+    ['SELECT application_id, sponsor_id FROM driver_applications', [{ application_id: 40, sponsor_id: 10 }]],
+    ['UPDATE driver_applications', { affectedRows: 1 }],
+    ['INSERT INTO driver_notifications', { insertId: 1 }],
+  ]);
 
   const response = await agent.put('/api/admin/drivers/1/affiliation').send({ sponsorId: null }).expect(200);
 
   expect(response.body).toEqual({ message: 'Driver sponsor affiliation saved.', sponsorId: null });
   expect(db.execute).toHaveBeenCalledWith(expect.stringContaining("SET status = 'rejected'"), [1]);
+  expect(db.execute).toHaveBeenCalledWith(expect.stringContaining("'sponsor_dropped'"), [1, 10]);
   expect(db.commit).toHaveBeenCalledOnce();
 });

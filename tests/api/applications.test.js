@@ -89,12 +89,14 @@ describe('sponsor decisions', () => {
     const agent = await signIn(app, users.sponsor);
     mockQueries([
       roleLookup,
-      ['FROM driver_applications WHERE application_id = ?', [{ sponsor_id: 10, status: 'pending' }]],
+      ['FROM driver_applications WHERE application_id = ?', [{ driver_user_id: users.driver.user_id, sponsor_id: 10, status: 'pending' }]],
       ['UPDATE driver_applications', { affectedRows: 1 }],
+      ['INSERT INTO driver_notifications', { insertId: 1 }],
     ]);
 
     const res = await agent.patch('/api/applications/5/decide').send({ decision: 'approved' }).expect(200);
 
     expect(res.body).toEqual({ application_id: 5, status: 'approved' });
+    expect(db.execute).toHaveBeenCalledWith(expect.stringContaining("'application_approved'"), [users.driver.user_id, 10]);
   });
 });

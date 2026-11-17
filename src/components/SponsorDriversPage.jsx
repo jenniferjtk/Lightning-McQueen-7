@@ -33,6 +33,7 @@ export default function SponsorDriversPage({ user }) {
   const [drivers, setDrivers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [sponsorLinked, setSponsorLinked] = useState(true);
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('name-asc');
@@ -45,6 +46,12 @@ export default function SponsorDriversPage({ user }) {
   const [pointEntries, setPointEntries] = useState([]);
   const [pointEntriesLoading, setPointEntriesLoading] = useState(false);
   const [pointEntriesError, setPointEntriesError] = useState('');
+  const [driverOrders, setDriverOrders] = useState([]);
+  const [driverOrdersLoading, setDriverOrdersLoading] = useState(false);
+  const [driverOrdersError, setDriverOrdersError] = useState('');
+  const [dropReason, setDropReason] = useState('');
+  const [dropError, setDropError] = useState('');
+  const [droppingDriver, setDroppingDriver] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
@@ -99,6 +106,57 @@ export default function SponsorDriversPage({ user }) {
     return () => { isCurrent = false; };
   }, [selectedDriverId, pointHistoryVisible, pointHistoryVersion]);
 
+  useEffect(() => {
+    if (!selectedDriverId) {
+      setDriverOrders([]);
+      return undefined;
+    }
+    let isCurrent = true;
+    setDriverOrdersLoading(true);
+    setDriverOrdersError('');
+    fetch(`/api/sponsor/drivers/${selectedDriverId}/orders`, { credentials: 'include' })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.message || 'Unable to load this driver’s redemptions.');
+        if (!Array.isArray(data.orders)) throw new Error('Unable to load this driver’s redemptions.');
+        if (isCurrent) setDriverOrders(data.orders);
+      })
+      .catch((requestError) => { if (isCurrent) setDriverOrdersError(requestError.message); })
+      .finally(() => { if (isCurrent) setDriverOrdersLoading(false); });
+    return () => { isCurrent = false; };
+  }, [selectedDriverId]);
+
+  const dropSelectedDriver = async (event) => {
+    event.preventDefault();
+    const reason = dropReason.trim();
+    if (!reason) {
+      setDropError('Provide a reason before removing this driver.');
+      return;
+    }
+    if (!window.confirm(`Remove ${selectedDriver.firstName} ${selectedDriver.lastName} from your sponsor program?`)) return;
+    setDroppingDriver(true);
+    setDropError('');
+    try {
+      const response = await fetch(`/api/sponsor/drivers/${selectedDriver.id}/drop`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || 'Unable to remove this driver.');
+      setDrivers((current) => current.filter((driver) => driver.id !== selectedDriver.id));
+      setSelectedDriverId(null);
+      setPointHistoryVisible(false);
+      setDropReason('');
+      setNotice(data.message || 'Driver removed from your organization.');
+    } catch (requestError) {
+      setDropError(requestError.message);
+    } finally {
+      setDroppingDriver(false);
+    }
+  };
+
   const visibleDrivers = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
     const filtered = query
@@ -123,6 +181,8 @@ export default function SponsorDriversPage({ user }) {
         <h1>Driver management.</h1>
         <p>Find drivers in your organization and review their current point balances.</p>
       </section>
+
+      {notice && <p className="driver-management-page__notice" role="status">{notice}</p>}
 
       {!loading && !error && sponsorLinked && (
         <BulkUserUpload onCreated={() => setReloadKey((key) => key + 1)} />
@@ -217,6 +277,30 @@ export default function SponsorDriversPage({ user }) {
                   <dd>{pointValue(selectedDriver).toLocaleString()}</dd>
                 </div>
               </dl>
+              <section className="driver-management__redemptions" aria-label="Driver catalog redemptions">
+                <h3>Catalog redemptions</h3>
+                {driverOrdersLoading ? (
+                  <p className="driver-management-page__message">Loading redemptions...</p>
+                ) : driverOrdersError ? (
+                  <p className="driver-management-page__message" role="alert">{driverOrdersError}</p>
+                ) : driverOrders.length === 0 ? (
+                  <p className="driver-management-page__message">This driver has no catalog redemptions.</p>
+                ) : (
+                  <div className="driver-management__table-wrap">
+                    <table className="driver-management__table">
+                      <thead><tr><th scope="col">Date</th><th scope="col">Item</th><th scope="col">Points</th><th scope="col">Status</th></tr></thead>
+                      <tbody>{driverOrders.map((order) => (
+                        <tr key={order.orderId}>
+                          <td>{formatDate(order.createdAt)}</td>
+                          <td>{order.productTitle}</td>
+                          <td>{Number(order.pointCost).toLocaleString()}</td>
+                          <td>{order.status}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
               {pointHistoryVisible && (
                 <>
                   <div className="driver-management__point-history" id="driver-point-history">
@@ -275,6 +359,24 @@ export default function SponsorDriversPage({ user }) {
                   />
                 )}
               </div>
+              <form className="driver-management__drop-form" onSubmit={dropSelectedDriver}>
+                <h3>Remove driver from organization</h3>
+                <label>
+                  Reason for removal
+                  <textarea
+                    value={dropReason}
+                    onChange={(event) => setDropReason(event.target.value)}
+                    maxLength={1000}
+                    rows={3}
+                    required
+                    disabled={droppingDriver}
+                  />
+                </label>
+                {dropError && <p className="driver-management-page__message" role="alert">{dropError}</p>}
+                <button type="submit" className="driver-management__drop-button" disabled={droppingDriver || !dropReason.trim()}>
+                  {droppingDriver ? 'Removing driver...' : 'Remove driver'}
+                </button>
+              </form>
             </section>
           )}
 
