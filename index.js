@@ -1621,6 +1621,75 @@ app.get('/api/admin/reports/sales', requireAdmin, async (req, res) => {
   }
 });
 
+const isCalendarDate = (value) => {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+};
+
+// What each sponsor owes for its drivers' purchases in a date range (story
+// 21122): every order that wasn't canceled, grouped by the sponsor whose
+// catalog it came from. The amount due is the dollar price copied onto each
+// order at checkout. Totals are summed in cents so they don't drift.
+app.get('/api/admin/reports/sponsor-billing', requireAdmin, async (req, res) => {
+  const { startDate, endDate } = req.query;
+  if (!isCalendarDate(startDate) || !isCalendarDate(endDate) || startDate > endDate) {
+    return res.status(400).json({ message: 'Choose a valid date range.' });
+  }
+  try {
+    const [rows] = await pool.execute(
+      `SELECT o.order_id, o.created_at, o.status, o.sponsor_id, s.name AS sponsor_name,
+              o.product_title, o.unit_price, o.point_cost,
+              d.first_name AS driver_first_name, d.last_name AS driver_last_name, d.email AS driver_email
+       FROM orders o
+       JOIN sponsors s ON s.sponsor_id = o.sponsor_id
+       JOIN users d ON d.user_id = o.driver_user_id
+       WHERE o.status <> 'canceled'
+         AND o.created_at >= ? AND o.created_at < DATE_ADD(?, INTERVAL 1 DAY)
+       ORDER BY s.name, o.created_at DESC, o.order_id DESC`,
+      [startDate, endDate],
+    );
+
+    const purchases = rows.map((row) => ({
+      orderId: Number(row.order_id),
+      createdAt: row.created_at,
+      status: row.status,
+      sponsorId: Number(row.sponsor_id),
+      sponsorName: row.sponsor_name,
+      driverName: `${row.driver_first_name || ''} ${row.driver_last_name || ''}`.trim() || row.driver_email,
+      productTitle: row.product_title,
+      unitPrice: Number(row.unit_price),
+      pointCost: Number(row.point_cost),
+    }));
+
+    const bySponsor = new Map();
+    for (const purchase of purchases) {
+      const entry = bySponsor.get(purchase.sponsorId) || {
+        sponsorId: purchase.sponsorId, sponsorName: purchase.sponsorName, orderCount: 0, pointsRedeemed: 0, cents: 0,
+      };
+      entry.orderCount += 1;
+      entry.pointsRedeemed += purchase.pointCost;
+      entry.cents += Math.round(purchase.unitPrice * 100);
+      bySponsor.set(purchase.sponsorId, entry);
+    }
+    const sponsors = [...bySponsor.values()].map(({ cents, ...entry }) => ({ ...entry, amountDue: cents / 100 }));
+    const totalCents = sponsors.reduce((sum, entry) => sum + Math.round(entry.amountDue * 100), 0);
+
+    return res.json({
+      sponsors,
+      purchases,
+      totals: {
+        orderCount: purchases.length,
+        pointsRedeemed: sponsors.reduce((sum, entry) => sum + entry.pointsRedeemed, 0),
+        amountDue: totalCents / 100,
+      },
+    });
+  } catch (error) {
+    console.error('Sponsor billing report failed:', error.message);
+    return res.status(500).json({ message: 'Unable to build the sponsor billing report.' });
+  }
+});
+
 app.get('/api/reports/sponsor-points', requireRole('admin', 'sponsor'), async (req, res) => {
   const { startDate, endDate, driverId = 'all' } = req.query;
   const isValidDate = (value) => {

@@ -877,6 +877,10 @@ body {
 .reports-results__heading p { color: var(--color-slate); font-size: 0.82rem; margin: 0.3rem 0 0; }
 .reports-download { background: #fff; border: 1px solid #cbd2d8; color: var(--color-asphalt); min-height: 2.35rem; padding: 0.5rem 0.8rem; }
 .reports-download:hover { background: #edf3f8; color: #2f5c80; }
+.billing-report__actions { align-items: end; display: flex; flex-wrap: wrap; gap: 0.75rem; }
+.billing-report__filter { color: var(--color-slate); display: grid; font-size: 0.82rem; font-weight: 700; gap: 0.35rem; }
+.billing-report__filter select { background: #fff; border: 1px solid #cbd2d8; border-radius: 4px; color: var(--color-ink); font: inherit; min-height: 2.35rem; padding: 0.4rem 0.6rem; }
+.reports-panel .reports-results__heading + .reports-empty, .reports-panel .reports-table-wrap + .reports-results__heading { margin-top: 1.5rem; }
 .reports-table-wrap { overflow-x: auto; }
 .reports-table { border-collapse: collapse; min-width: 820px; width: 100%; }
 .reports-table th { color: var(--color-slate); font-size: 0.72rem; font-weight: 800; letter-spacing: 0.04em; padding: 0.9rem 0.65rem; text-align: left; text-transform: uppercase; }
