@@ -12,6 +12,7 @@ import SponsorsPage from './components/SponsorsPage.jsx';
 import MyApplicationPage from './components/MyApplicationPage.jsx';
 import AdminHomePage from './components/AdminHomePage.jsx';
 import AdminDriversPage from './components/AdminDriversPage.jsx';
+import AdminSalesReportsPage from './components/AdminSalesReportsPage.jsx';
 import SponsorConversionCard from './components/SponsorConversionCard.jsx';
 import SponsorApplicationsPage from './components/SponsorApplicationsPage.jsx';
 import SponsorDriversPage from './components/SponsorDriversPage.jsx';
@@ -54,6 +55,7 @@ export default function App() {
     if (pathname === '/application') return 'application';
     if (pathname === '/admin') return 'admin';
     if (pathname === '/admin/drivers') return 'drivers';
+    if (pathname === '/admin/reports') return 'admin-reports';
     if (pathname === '/sponsor/applications') return 'sponsor-applications';
     if (pathname === '/sponsor/drivers') return 'sponsor-drivers';
     if (pathname === '/sponsor/catalog') return 'sponsor-catalog';
@@ -80,6 +82,7 @@ export default function App() {
       application: '/application',
       admin: '/admin',
       drivers: '/admin/drivers',
+      'admin-reports': '/admin/reports',
       'sponsor-applications': '/sponsor/applications',
       'sponsor-drivers': '/sponsor/drivers',
       'sponsor-catalog': '/sponsor/catalog',
@@ -153,7 +156,7 @@ export default function App() {
     }
   };
   const isAdmin = user.role === 'admin';
-  const adminPages = ['admin', 'drivers', 'user-log'];
+  const adminPages = ['admin', 'drivers', 'admin-reports', 'user-log'];
   const isSponsor = user.role === 'sponsor';
   const sponsorPages = ['sponsor-applications', 'sponsor-drivers', 'sponsor-catalog'];
   const isPreview = Boolean(previewRole);
@@ -196,6 +199,15 @@ export default function App() {
         />
       ) : visiblePage === 'drivers' ? (
         <AdminDriversPage />
+      ) : visiblePage === 'admin-reports' ? (
+        <main className="reports-page">
+          <header className="reports-page__intro">
+            <p className="reports-page__eyebrow">Administration</p>
+            <h1>Admin Reports</h1>
+            <p>Review catalog order sales across sponsors and drivers, with flexible date ranges and exportable results.</p>
+          </header>
+          <AdminSalesReportsPage />
+        </main>
       ) : visiblePage === 'sponsor-applications' ? (
         <SponsorApplicationsPage user={previewUser} onPendingCountChange={handlePendingCountChange} preview={isPreview} />
       ) : visiblePage === 'sponsor-drivers' ? (
