@@ -98,6 +98,23 @@ const newUserError = ({ email, password, firstName, lastName, role }, allowedRol
 
 const hashPassword = (password) => bcrypt.hash(password, 12);
 
+const refreshAccountStatus = async (userId) => {
+  await pool.execute(
+    `UPDATE users
+       SET account_status = 'active', suspended_until = NULL
+     WHERE user_id = ?
+       AND account_status = 'suspended'
+       AND suspended_until IS NOT NULL
+       AND suspended_until <= NOW()`,
+    [userId],
+  );
+  const [rows] = await pool.execute(
+    'SELECT user_id, role, sponsor_id, account_status, suspended_until FROM users WHERE user_id = ?',
+    [userId],
+  );
+  return rows[0] || null;
+};
+
 const requireRuleManager = async (req, res, next) => {
   if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
   try {
@@ -265,8 +282,15 @@ app.post('/api/auth/login', async (req, res) => {
     if (!succeeded) {
       return res.status(401).json({ message: 'Invalid email or password.' });
     }
+
+    const accountTrackingEnabled = Object.prototype.hasOwnProperty.call(user, 'account_status') || Object.prototype.hasOwnProperty.call(user, 'suspended_until');
+    const refreshedUser = accountTrackingEnabled ? await refreshAccountStatus(user.user_id) : user;
+    if (refreshedUser?.account_status === 'suspended' && refreshedUser.suspended_until && new Date(refreshedUser.suspended_until).getTime() > Date.now()) {
+      return res.status(403).json({ message: `This account is suspended until ${new Date(refreshedUser.suspended_until).toLocaleString()}.` });
+    }
+
     req.session.userId = user.user_id;
-    return res.json({ user: publicUser(user) });
+    return res.json({ user: publicUser(refreshedUser || user) });
   } catch (error) {
     console.error('Login failed:', error.message);
     return res.status(500).json({ message: 'Unable to sign you in.' });
@@ -908,7 +932,9 @@ app.get('/api/sponsor/drivers', async (req, res) => {
 
     const [drivers] = await pool.execute(
       `SELECT u.user_id AS id, u.first_name AS firstName, u.last_name AS lastName,
-              u.email, u.created_at AS createdAt, COALESCE(points.total, 0) - COALESCE(spent.total, 0) AS points,
+              u.email, u.created_at AS createdAt, u.account_status AS account_status,
+              u.suspended_until AS suspended_until,
+              COALESCE(points.total, 0) - COALESCE(spent.total, 0) AS points,
               a.application_id AS applicationId, a.status, a.submitted_at AS submittedAt,
               a.decided_at AS decidedAt, s.name AS sponsorName
        FROM driver_applications a
@@ -932,11 +958,63 @@ app.get('/api/sponsor/drivers', async (req, res) => {
     );
     return res.json({
       sponsorLinked: true,
-      drivers: drivers.map((driver) => ({ ...driver, points: Number(driver.points) })),
+      drivers: drivers.map((driver) => ({
+        ...driver,
+        points: Number(driver.points),
+        account_status: driver.account_status || 'active',
+        suspended_until: driver.suspended_until || null,
+      })),
     });
   } catch (error) {
     console.error('Sponsor driver list failed:', error.message);
     return res.status(500).json({ message: 'Unable to load sponsor drivers.' });
+  }
+});
+
+app.post('/api/sponsor/drivers/:driverUserId/suspend', requireRole('sponsor'), async (req, res) => {
+  const driverUserId = Number(req.params.driverUserId);
+  const durationHours = Number(req.body?.durationHours);
+
+  if (!Number.isSafeInteger(driverUserId) || driverUserId < 1) {
+    return res.status(400).json({ message: 'Choose a valid driver.' });
+  }
+  if (!Number.isFinite(durationHours) || durationHours < 0 || durationHours > 8760) {
+    return res.status(400).json({ message: 'Suspend the driver for between 1 hour and 365 days.' });
+  }
+
+  try {
+    const [approved] = await pool.execute(
+      "SELECT application_id FROM driver_applications WHERE driver_user_id = ? AND sponsor_id = ? AND status = 'approved'",
+      [driverUserId, req.currentUser.sponsor_id],
+    );
+    if (!approved[0]) return res.status(403).json({ message: 'This driver is not in your sponsor program.' });
+
+    if (durationHours === 0) {
+      const [result] = await pool.execute(
+        "UPDATE users SET account_status = 'active', suspended_until = NULL WHERE user_id = ? AND role = 'driver'",
+        [driverUserId],
+      );
+      if (!result.affectedRows) return res.status(404).json({ message: 'Driver account not found.' });
+      return res.json({ suspended: false, message: 'Driver account re-enabled.' });
+    }
+
+    const [result] = await pool.execute(
+      `UPDATE users
+         SET account_status = 'suspended', suspended_until = DATE_ADD(NOW(), INTERVAL ? HOUR)
+       WHERE user_id = ? AND role = 'driver'`,
+      [durationHours, driverUserId],
+    );
+    if (!result.affectedRows) return res.status(404).json({ message: 'Driver account not found.' });
+
+    const suspendedUntil = new Date(Date.now() + durationHours * 60 * 60 * 1000).toISOString();
+    return res.json({
+      suspended: true,
+      suspendedUntil,
+      message: `Driver account suspended until ${new Date(suspendedUntil).toLocaleString()}.`,
+    });
+  } catch (error) {
+    console.error('Driver suspension failed:', error.message);
+    return res.status(500).json({ message: 'Unable to update the driver account status.' });
   }
 });
 
@@ -1050,22 +1128,36 @@ app.delete('/api/sponsor-rules/:ruleId', requireRuleManager, async (req, res) =>
 // Loads the signed-in user onto req.currentUser and rejects anyone whose role
 // isn't listed. Application routes take the driver/sponsor identity from here,
 // never from the request body or query string.
-const requireRole = (...roles) => async (req, res, next) => {
-  if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
-  try {
-    const [rows] = await pool.execute('SELECT user_id, role, sponsor_id FROM users WHERE user_id = ?', [req.session.userId]);
-    if (!rows[0]) return res.status(401).json({ message: 'Session expired.' });
-    if (!roles.includes(rows[0].role)) return res.status(403).json({ message: 'You do not have access to this action.' });
-    if (rows[0].role === 'sponsor' && !rows[0].sponsor_id) {
-      return res.status(403).json({ message: 'Your account is not linked to a sponsor organization.' });
+function requireRole(...roles) {
+  return async (req, res, next) => {
+    if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
+    try {
+      const [rows] = await pool.execute(
+        'SELECT user_id, role, sponsor_id, account_status, suspended_until FROM users WHERE user_id = ?',
+        [req.session.userId],
+      );
+      if (!rows[0]) return res.status(401).json({ message: 'Session expired.' });
+
+      const accountTrackingEnabled = Object.prototype.hasOwnProperty.call(rows[0], 'account_status') || Object.prototype.hasOwnProperty.call(rows[0], 'suspended_until');
+      const user = accountTrackingEnabled ? await refreshAccountStatus(rows[0].user_id) : rows[0];
+      if (user?.account_status === 'suspended' && user.suspended_until && new Date(user.suspended_until).getTime() > Date.now()) {
+        return res.status(403).json({ message: `This account is suspended until ${new Date(user.suspended_until).toLocaleString()}.` });
+      }
+
+      if (!roles.includes(user?.role ?? rows[0].role)) {
+        return res.status(403).json({ message: 'You do not have access to this action.' });
+      }
+      if ((user?.role ?? rows[0].role) === 'sponsor' && !(user?.sponsor_id ?? rows[0].sponsor_id)) {
+        return res.status(403).json({ message: 'Your account is not linked to a sponsor organization.' });
+      }
+      req.currentUser = user || rows[0];
+      return next();
+    } catch (error) {
+      console.error('Role authorization failed:', error.message);
+      return res.status(500).json({ message: 'Unable to authorize this request.' });
     }
-    req.currentUser = rows[0];
-    return next();
-  } catch (error) {
-    console.error('Role authorization failed:', error.message);
-    return res.status(500).json({ message: 'Unable to authorize this request.' });
-  }
-};
+  };
+}
 
 const APPLICATION_STATUSES = ['pending', 'approved', 'rejected', 'withdrawn'];
 
