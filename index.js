@@ -43,6 +43,8 @@ const sessionStore = isLambda
   })
   : undefined;
 
+const REMEMBER_ME_MS = 1000 * 60 * 60 * 24 * 30;
+
 app.use(session({
   store: sessionStore,
   secret: process.env.SESSION_SECRET || 'development-session-secret',
@@ -290,6 +292,9 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     req.session.userId = user.user_id;
+    // "Keep me signed in" (the mobile app, story 29621): the session lasts 30
+    // days instead of the default 8 hours.
+    if (req.body.rememberMe === true) req.session.cookie.maxAge = REMEMBER_ME_MS;
     return res.json({ user: publicUser(refreshedUser || user) });
   } catch (error) {
     console.error('Login failed:', error.message);
@@ -2471,68 +2476,71 @@ const orderSummary = (row) => ({
   estimatedDelivery: row.status === 'canceled' ? null : estimatedDeliveryDate(row.created_at),
 });
 
-// A driver redeems one item from a sponsor's catalog. The price is re-fetched
-// live and must match the point cost the driver confirmed; otherwise nothing is
-// charged and the new cost is returned so they can confirm again. Stock and
-// balance are checked inside a transaction holding the driver's row lock, so
-// two checkouts at once can't spend the same points or the last unit twice.
-app.post('/api/orders', requireRole('driver'), async (req, res) => {
-  const sponsorId = parseId(req.body?.sponsorId);
-  const productId = parseId(req.body?.productId);
-  const expectedPointCost = Number(req.body?.expectedPointCost);
-  if (!sponsorId || !productId) return res.status(400).json({ message: 'Choose a product from a sponsor catalog.' });
-  if (!Number.isSafeInteger(expectedPointCost) || expectedPointCost < 0) {
-    return res.status(400).json({ message: 'Confirm the item\'s point cost before ordering.' });
+// Redeems one item from a sponsor's catalog with a driver's points, for the
+// driver's own checkout or a sponsor ordering on the driver's behalf. The price
+// is re-fetched live and must match the point cost that was confirmed;
+// otherwise nothing is charged and the new cost is returned so it can be
+// confirmed again. Stock and balance are checked inside a transaction holding
+// the driver's row lock, so two checkouts at once can't spend the same points
+// or the last unit twice. Returns the HTTP status and body to send.
+// `onBehalfOf` is the driver's name when a sponsor is ordering, used to word
+// the shortfall message.
+const placeOrder = async ({ driverId, sponsorId, productId, expectedPointCost, onBehalfOf = null }) => {
+  const [catalogRows] = await pool.execute(
+    `SELECT s.name AS sponsor_name, s.point_conversion_rate
+     FROM sponsor_catalog sc
+     JOIN sponsors s ON s.sponsor_id = sc.sponsor_id
+     WHERE sc.sponsor_id = ? AND sc.product_id = ?`,
+    [sponsorId, productId],
+  );
+  if (!catalogRows[0]) return { status: 404, body: { message: 'That product is not in this sponsor\'s catalog.' } };
+  const { sponsor_name: sponsorName, point_conversion_rate: rate } = catalogRows[0];
+
+  const [addressRows] = await pool.execute(
+    `SELECT shipping_address, shipping_city, shipping_state, shipping_postal_code, shipping_country
+     FROM users u WHERE u.user_id = ?`,
+    [driverId],
+  );
+  const address = addressRows[0];
+  if (!address?.shipping_address || !address.shipping_city || !address.shipping_postal_code || !address.shipping_country) {
+    return {
+      status: 400,
+      body: {
+        message: onBehalfOf
+          ? `${onBehalfOf} hasn't saved a shipping address yet, so this order can't be shipped.`
+          : 'Save a shipping address before placing an order.',
+        code: 'ADDRESS_REQUIRED',
+      },
+    };
   }
 
-  const driverId = req.currentUser.user_id;
-  let connection;
-  try {
-    if (!(await canViewSponsorCatalog(req.currentUser, sponsorId))) {
-      return res.status(403).json({ message: 'You do not have access to this sponsor\'s catalog.' });
-    }
-    const [catalogRows] = await pool.execute(
-      `SELECT s.name AS sponsor_name, s.point_conversion_rate
-       FROM sponsor_catalog sc
-       JOIN sponsors s ON s.sponsor_id = sc.sponsor_id
-       WHERE sc.sponsor_id = ? AND sc.product_id = ?`,
-      [sponsorId, productId],
-    );
-    if (!catalogRows[0]) return res.status(404).json({ message: 'That product is not in this sponsor\'s catalog.' });
-    const { sponsor_name: sponsorName, point_conversion_rate: rate } = catalogRows[0];
-
-    const [addressRows] = await pool.execute(
-      `SELECT shipping_address, shipping_city, shipping_state, shipping_postal_code, shipping_country
-       FROM users u WHERE u.user_id = ?`,
-      [driverId],
-    );
-    const address = addressRows[0];
-    if (!address?.shipping_address || !address.shipping_city || !address.shipping_postal_code || !address.shipping_country) {
-      return res.status(400).json({ message: 'Save a shipping address before placing an order.', code: 'ADDRESS_REQUIRED' });
-    }
-
-    const live = await fetchProduct(productId);
-    if (!live) {
-      return res.status(409).json({ message: 'This item is no longer available.', code: 'PRODUCT_UNAVAILABLE' });
-    }
-    await pool.execute(
-      `UPDATE cached_products SET title = ?, price = ?, description = ?, category = ?, image_url = ?
-       WHERE product_id = ?`,
-      [live.title, live.price, live.description, live.category, live.imageUrl, productId],
-    );
-    const cost = pointCost(live.price, rate);
-    if (cost === null) {
-      return res.status(409).json({ message: 'This sponsor has not set a point value yet.', code: 'PRICE_UNAVAILABLE' });
-    }
-    if (cost !== expectedPointCost) {
-      return res.status(409).json({
+  const live = await fetchProduct(productId);
+  if (!live) {
+    return { status: 409, body: { message: 'This item is no longer available.', code: 'PRODUCT_UNAVAILABLE' } };
+  }
+  await pool.execute(
+    `UPDATE cached_products SET title = ?, price = ?, description = ?, category = ?, image_url = ?
+     WHERE product_id = ?`,
+    [live.title, live.price, live.description, live.category, live.imageUrl, productId],
+  );
+  const cost = pointCost(live.price, rate);
+  if (cost === null) {
+    return { status: 409, body: { message: 'This sponsor has not set a point value yet.', code: 'PRICE_UNAVAILABLE' } };
+  }
+  if (cost !== expectedPointCost) {
+    return {
+      status: 409,
+      body: {
         message: `The price changed to ${cost.toLocaleString('en-US')} points. Review the new cost and confirm again.`,
         code: 'PRICE_CHANGED',
         pointCost: cost,
         price: live.price,
-      });
-    }
+      },
+    };
+  }
 
+  let connection;
+  try {
     connection = await pool.getConnection();
     await connection.beginTransaction();
     await connection.execute('SELECT user_id FROM users WHERE user_id = ? FOR UPDATE', [driverId]);
@@ -2543,23 +2551,29 @@ app.post('/api/orders', requireRole('driver'), async (req, res) => {
     );
     if (!stockRows[0]) {
       await connection.rollback();
-      return res.status(404).json({ message: 'That product is not in this sponsor\'s catalog.' });
+      return { status: 404, body: { message: 'That product is not in this sponsor\'s catalog.' } };
     }
     const stock = stockRows[0].stock_quantity;
     if (stock !== null && Number(stock) < 1) {
       await connection.rollback();
-      return res.status(409).json({ message: 'This item is out of stock.', code: 'OUT_OF_STOCK' });
+      return { status: 409, body: { message: 'This item is out of stock.', code: 'OUT_OF_STOCK' } };
     }
 
     const balance = await driverSponsorBalance(connection, driverId, sponsorId);
     if (cost > balance) {
       await connection.rollback();
-      return res.status(409).json({
-        message: `You need ${(cost - balance).toLocaleString('en-US')} more points to order this item.`,
-        code: 'INSUFFICIENT_POINTS',
-        pointBalance: balance,
-        pointCost: cost,
-      });
+      const shortfall = (cost - balance).toLocaleString('en-US');
+      return {
+        status: 409,
+        body: {
+          message: onBehalfOf
+            ? `${onBehalfOf} needs ${shortfall} more points for this item.`
+            : `You need ${shortfall} more points to order this item.`,
+          code: 'INSUFFICIENT_POINTS',
+          pointBalance: balance,
+          pointCost: cost,
+        },
+      };
     }
 
     if (stock !== null) {
@@ -2577,21 +2591,24 @@ app.post('/api/orders', requireRole('driver'), async (req, res) => {
     );
     await connection.commit();
 
-    return res.status(201).json({
-      order: orderSummary({
-        order_id: result.insertId,
-        sponsor_id: sponsorId,
-        sponsor_name: sponsorName,
-        product_id: productId,
-        product_title: live.title,
-        unit_price: live.price,
-        point_cost: cost,
-        status: 'pending',
-        created_at: new Date().toISOString(),
-      }),
-      pointBalance: balance - cost,
-      stockQuantity: stock === null ? null : Number(stock) - 1,
-    });
+    return {
+      status: 201,
+      body: {
+        order: orderSummary({
+          order_id: result.insertId,
+          sponsor_id: sponsorId,
+          sponsor_name: sponsorName,
+          product_id: productId,
+          product_title: live.title,
+          unit_price: live.price,
+          point_cost: cost,
+          status: 'pending',
+          created_at: new Date().toISOString(),
+        }),
+        pointBalance: balance - cost,
+        stockQuantity: stock === null ? null : Number(stock) - 1,
+      },
+    };
   } catch (error) {
     if (connection) {
       try {
@@ -2600,9 +2617,98 @@ app.post('/api/orders', requireRole('driver'), async (req, res) => {
         // The original error is the one worth reporting.
       }
     }
-    return sendCatalogError(res, error, 'Checkout failed', 'Unable to place this order.');
+    throw error;
   } finally {
     connection?.release();
+  }
+};
+
+const parseOrderRequest = (body) => ({
+  productId: parseId(body?.productId),
+  expectedPointCost: Number(body?.expectedPointCost),
+});
+const orderRequestError = ({ productId, expectedPointCost }) => {
+  if (!productId) return 'Choose a product from a sponsor catalog.';
+  if (!Number.isSafeInteger(expectedPointCost) || expectedPointCost < 0) return 'Confirm the item\'s point cost before ordering.';
+  return null;
+};
+
+// A driver redeems one item from a sponsor catalog they belong to.
+app.post('/api/orders', requireRole('driver'), async (req, res) => {
+  const sponsorId = parseId(req.body?.sponsorId);
+  const request = parseOrderRequest(req.body);
+  if (!sponsorId) return res.status(400).json({ message: 'Choose a product from a sponsor catalog.' });
+  const invalid = orderRequestError(request);
+  if (invalid) return res.status(400).json({ message: invalid });
+
+  try {
+    if (!(await canViewSponsorCatalog(req.currentUser, sponsorId))) {
+      return res.status(403).json({ message: 'You do not have access to this sponsor\'s catalog.' });
+    }
+    const { status, body } = await placeOrder({ driverId: req.currentUser.user_id, sponsorId, ...request });
+    return res.status(status).json(body);
+  } catch (error) {
+    return sendCatalogError(res, error, 'Checkout failed', 'Unable to place this order.');
+  }
+});
+
+// The sponsor's approved drivers it can order for (story 25021), with each
+// driver's balance with this sponsor and whether they have a shipping address.
+app.get('/api/sponsor/order-drivers', requireRole('sponsor'), async (req, res) => {
+  const sponsorId = req.currentUser.sponsor_id;
+  try {
+    const [drivers] = await pool.execute(
+      `SELECT u.user_id, u.first_name, u.last_name, u.email,
+              (u.shipping_address IS NOT NULL AND u.shipping_address <> ''
+               AND u.shipping_city IS NOT NULL AND u.shipping_city <> ''
+               AND u.shipping_postal_code IS NOT NULL AND u.shipping_postal_code <> ''
+               AND u.shipping_country IS NOT NULL AND u.shipping_country <> '') AS has_address
+       FROM driver_applications a
+       JOIN users u ON u.user_id = a.driver_user_id
+       WHERE a.sponsor_id = ? AND a.status = 'approved' AND u.role = 'driver'
+       ORDER BY u.last_name, u.first_name, u.user_id`,
+      [sponsorId],
+    );
+    const withBalances = await Promise.all(drivers.map(async (driver) => ({
+      id: Number(driver.user_id),
+      name: `${driver.first_name || ''} ${driver.last_name || ''}`.trim() || driver.email,
+      email: driver.email,
+      hasShippingAddress: Boolean(Number(driver.has_address)),
+      pointBalance: await driverSponsorBalance(pool, driver.user_id, sponsorId),
+    })));
+    return res.json({ drivers: withBalances });
+  } catch (error) {
+    console.error('Sponsor order driver lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load your drivers.' });
+  }
+});
+
+// A sponsor redeems an item from its own catalog for one of its approved
+// drivers, spending that driver's points with this sponsor (story 25021).
+app.post('/api/sponsor/orders', requireRole('sponsor'), async (req, res) => {
+  const driverId = parseId(req.body?.driverId);
+  const request = parseOrderRequest(req.body);
+  if (!driverId) return res.status(400).json({ message: 'Choose the driver you are ordering for.' });
+  const invalid = orderRequestError(request);
+  if (invalid) return res.status(400).json({ message: invalid });
+
+  const sponsorId = Number(req.currentUser.sponsor_id);
+  try {
+    const [drivers] = await pool.execute(
+      `SELECT u.first_name, u.last_name, u.email
+       FROM driver_applications a
+       JOIN users u ON u.user_id = a.driver_user_id
+       WHERE a.driver_user_id = ? AND a.sponsor_id = ? AND a.status = 'approved' AND u.role = 'driver'
+       LIMIT 1`,
+      [driverId, sponsorId],
+    );
+    if (!drivers[0]) return res.status(404).json({ message: 'That driver is not one of your approved drivers.' });
+    const driverName = `${drivers[0].first_name || ''} ${drivers[0].last_name || ''}`.trim() || drivers[0].email;
+
+    const { status, body } = await placeOrder({ driverId, sponsorId, ...request, onBehalfOf: driverName });
+    return res.status(status).json(status === 201 ? { ...body, driver: { id: driverId, name: driverName } } : body);
+  } catch (error) {
+    return sendCatalogError(res, error, 'On-behalf checkout failed', 'Unable to place this order.');
   }
 });
 

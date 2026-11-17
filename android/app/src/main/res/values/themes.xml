@@ -75,6 +75,13 @@
         <item name="android:padding">12dp</item>
     </style>
 
+    <style name="Text.Notice">
+        <item name="android:background">@color/notice_background</item>
+        <item name="android:textColor">@color/positive</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:padding">12dp</item>
+    </style>
+
     <style name="Input">
         <item name="android:background">@drawable/input</item>
         <item name="android:minHeight">@dimen/touch_target</item>

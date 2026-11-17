@@ -13,4 +13,5 @@
     <color name="positive">#24633A</color>
     <color name="negative">#963B31</color>
     <color name="error_background">#FBEFED</color>
+    <color name="notice_background">#E2F3E6</color>
 </resources>

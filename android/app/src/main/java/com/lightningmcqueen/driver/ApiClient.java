@@ -1,5 +1,6 @@
 package com.lightningmcqueen.driver;
 
+import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -14,6 +15,7 @@ import java.net.CookieHandler;
 import java.net.CookieManager;
 import java.net.CookiePolicy;
 import java.net.HttpURLConnection;
+import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
@@ -21,8 +23,9 @@ import java.util.concurrent.Executors;
 
 /**
  * Talks to the same Express API the website uses. The login session is the
- * same cookie the browser gets; CookieManager keeps it for the app's
- * lifetime, so every request after login is signed in.
+ * same cookie the browser gets; CookieManager sends it with every request
+ * after login, and PersistentCookieStore keeps it across restarts when the
+ * driver chose to stay signed in.
  */
 public final class ApiClient {
 
@@ -37,12 +40,33 @@ public final class ApiClient {
     private final ExecutorService executor = Executors.newFixedThreadPool(3);
     private final Handler mainThread = new Handler(Looper.getMainLooper());
 
+    private PersistentCookieStore cookies;
+
     private ApiClient() {
-        CookieHandler.setDefault(new CookieManager(null, CookiePolicy.ACCEPT_ORIGINAL_SERVER));
+    }
+
+    /** Called once from DriverApp, before any request. */
+    static synchronized void init(Context context) {
+        if (INSTANCE.cookies != null) return;
+        INSTANCE.cookies = new PersistentCookieStore(context.getApplicationContext(), URI.create(BuildConfig.API_BASE_URL));
+        CookieHandler.setDefault(new CookieManager(INSTANCE.cookies, CookiePolicy.ACCEPT_ORIGINAL_SERVER));
     }
 
     public static ApiClient get() {
         return INSTANCE;
+    }
+
+    /** True when a sign-in saved on an earlier run may still be valid. */
+    boolean hasSavedSession() {
+        return cookies != null && cookies.hasSavedCookies();
+    }
+
+    boolean remembersSignIn() {
+        return cookies == null || cookies.remembers();
+    }
+
+    void setRememberSignIn(boolean remember) {
+        if (cookies != null) cookies.setRemember(remember);
     }
 
     public void get(String path, Callback callback) {
@@ -51,6 +75,10 @@ public final class ApiClient {
 
     public void post(String path, JSONObject body, Callback callback) {
         request("POST", path, body, callback);
+    }
+
+    public void put(String path, JSONObject body, Callback callback) {
+        request("PUT", path, body, callback);
     }
 
     /** Forgets the session cookie, so the next request is signed out. */

@@ -35,6 +35,8 @@ public class DashboardActivity extends SignedInActivity {
         sponsors = findViewById(R.id.sponsors);
         updates = findViewById(R.id.updates);
         retry.setOnClickListener(view -> load());
+        findViewById(R.id.open_orders).setOnClickListener(view -> startActivity(new Intent(this, OrdersActivity.class)));
+        findViewById(R.id.open_address).setOnClickListener(view -> startActivity(new Intent(this, AddressActivity.class)));
     }
 
     // Reloads every time the screen comes back, so the balance reflects an
