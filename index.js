@@ -1389,6 +1389,146 @@ app.get('/api/sponsor/points/transactions', requireRole('sponsor'), async (req, 
   }
 });
 
+app.get('/api/admin/reports/sales/options', requireAdmin, async (req, res) => {
+  const { sponsorId = 'all' } = req.query;
+  const parsedSponsorId = typeof sponsorId === 'string' && /^\d+$/.test(sponsorId) ? Number(sponsorId) : null;
+  if (sponsorId !== 'all' && (!Number.isSafeInteger(parsedSponsorId) || parsedSponsorId < 1)) {
+    return res.status(400).json({ message: 'Choose a valid sponsor.' });
+  }
+
+  try {
+    const [sponsors] = await pool.execute(
+      'SELECT sponsor_id AS id, name FROM sponsors ORDER BY name, sponsor_id',
+    );
+    let drivers = [];
+    if (sponsorId !== 'all') {
+      const [rows] = await pool.execute(
+        `SELECT DISTINCT u.user_id AS id, CONCAT(u.first_name, ' ', u.last_name) AS name
+         FROM driver_applications a
+         JOIN users u ON u.user_id = a.driver_user_id
+         WHERE a.sponsor_id = ? AND a.status = 'approved' AND u.role = 'driver'
+         ORDER BY u.last_name, u.first_name, u.user_id`,
+        [parsedSponsorId],
+      );
+      drivers = rows;
+    }
+    return res.json({ sponsors, drivers });
+  } catch (error) {
+    console.error('Sales report filter lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load sales report filters.' });
+  }
+});
+
+app.get('/api/admin/reports/sales', requireAdmin, async (req, res) => {
+  const {
+    startDate,
+    endDate,
+    reportType = 'sponsor',
+    sponsorId = 'all',
+    driverId = 'all',
+    view = 'summary',
+  } = req.query;
+  const isValidDate = (value) => {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const date = new Date(`${value}T00:00:00Z`);
+    return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+  };
+  if (!isValidDate(startDate) || !isValidDate(endDate) || startDate > endDate) {
+    return res.status(400).json({ message: 'Choose a valid date range.' });
+  }
+  if (!['sponsor', 'driver'].includes(reportType) || !['summary', 'detailed'].includes(view)) {
+    return res.status(400).json({ message: 'Choose a valid report and view.' });
+  }
+  const parsedSponsorId = typeof sponsorId === 'string' && /^\d+$/.test(sponsorId) ? Number(sponsorId) : null;
+  if (sponsorId !== 'all' && (!Number.isSafeInteger(parsedSponsorId) || parsedSponsorId < 1)) {
+    return res.status(400).json({ message: 'Choose a valid sponsor.' });
+  }
+  const parsedDriverId = typeof driverId === 'string' && /^\d+$/.test(driverId) ? Number(driverId) : null;
+  const driverFilterActive = reportType === 'driver' && sponsorId !== 'all' && driverId !== 'all';
+  if (driverFilterActive && (!Number.isSafeInteger(parsedDriverId) || parsedDriverId < 1)) {
+    return res.status(400).json({ message: 'Choose a valid driver.' });
+  }
+
+  const conditions = [
+    'o.created_at >= ?',
+    'o.created_at < DATE_ADD(?, INTERVAL 1 DAY)',
+    "o.status <> 'canceled'",
+  ];
+  const params = [startDate, endDate];
+  if (sponsorId !== 'all') {
+    conditions.push('o.sponsor_id = ?');
+    params.push(parsedSponsorId);
+  }
+  if (driverFilterActive) {
+    conditions.push('o.driver_user_id = ?');
+    params.push(parsedDriverId);
+  }
+
+  const where = conditions.join(' AND ');
+  let query;
+  if (view === 'detailed') {
+    query = `SELECT o.order_id AS orderId,
+                    DATE_FORMAT(o.created_at, '%Y-%m-%d') AS saleDate,
+                    u.user_id AS driverId,
+                    CONCAT(u.first_name, ' ', u.last_name) AS driverName,
+                    s.sponsor_id AS sponsorId,
+                    s.name AS sponsorName,
+                    o.product_title AS productTitle,
+                    o.unit_price AS amount,
+                    o.point_cost AS pointCost,
+                    o.status
+             FROM orders o
+             JOIN users u ON u.user_id = o.driver_user_id
+             JOIN sponsors s ON s.sponsor_id = o.sponsor_id
+             WHERE ${where}
+             ORDER BY o.created_at DESC, o.order_id DESC`;
+  } else if (reportType === 'sponsor') {
+    query = `SELECT s.sponsor_id AS sponsorId,
+                    s.name AS sponsorName,
+                    COUNT(*) AS orderCount,
+                    SUM(o.unit_price) AS salesTotal,
+                    SUM(o.point_cost) AS pointsRedeemed
+             FROM orders o
+             JOIN sponsors s ON s.sponsor_id = o.sponsor_id
+             WHERE ${where}
+             GROUP BY s.sponsor_id, s.name
+             ORDER BY salesTotal DESC, s.name`;
+  } else {
+    query = `SELECT u.user_id AS driverId,
+                    CONCAT(u.first_name, ' ', u.last_name) AS driverName,
+                    GROUP_CONCAT(DISTINCT s.name ORDER BY s.name SEPARATOR ', ') AS sponsorName,
+                    COUNT(*) AS orderCount,
+                    SUM(o.unit_price) AS salesTotal,
+                    SUM(o.point_cost) AS pointsRedeemed
+             FROM orders o
+             JOIN users u ON u.user_id = o.driver_user_id
+             JOIN sponsors s ON s.sponsor_id = o.sponsor_id
+             WHERE ${where}
+             GROUP BY u.user_id, u.first_name, u.last_name
+             ORDER BY salesTotal DESC, u.last_name, u.first_name`;
+  }
+
+  try {
+    const [rows] = await pool.execute(query, params);
+    return res.json({
+      entries: rows.map((row) => ({
+        ...row,
+        ...(row.orderId !== undefined ? { orderId: Number(row.orderId) } : {}),
+        ...(row.driverId !== undefined ? { driverId: Number(row.driverId) } : {}),
+        ...(row.sponsorId !== undefined ? { sponsorId: Number(row.sponsorId) } : {}),
+        ...(row.orderCount !== undefined ? { orderCount: Number(row.orderCount) } : {}),
+        ...(row.amount !== undefined ? { amount: Number(row.amount) } : {}),
+        ...(row.pointCost !== undefined ? { pointCost: Number(row.pointCost) } : {}),
+        ...(row.salesTotal !== undefined ? { salesTotal: Number(row.salesTotal) } : {}),
+        ...(row.pointsRedeemed !== undefined ? { pointsRedeemed: Number(row.pointsRedeemed) } : {}),
+      })),
+    });
+  } catch (error) {
+    console.error('Sales report lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load the sales report.' });
+  }
+});
+
 app.get('/api/reports/sponsor-points', requireRole('admin', 'sponsor'), async (req, res) => {
   const { startDate, endDate, driverId = 'all' } = req.query;
   const isValidDate = (value) => {

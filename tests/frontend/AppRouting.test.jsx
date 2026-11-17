@@ -22,6 +22,8 @@ function renderAs(role, path, driver = {}, orders = []) {
     if (url.includes('/api/sponsor/drivers')) return json({ sponsorLinked: true, drivers: [] });
     if (url.includes('/api/reports/audit-log')) return json({ entries: [] });
     if (url.includes('/api/reports/sponsor-points')) return json({ entries: [] });
+    if (url.includes('/api/admin/reports/sales/options')) return json({ sponsors: [], drivers: [] });
+    if (url.includes('/api/admin/reports/sales')) return json({ entries: [] });
     if (url.includes('/api/sponsor-rules')) return json({ rules: [] });
     if (url.includes('/catalog')) return json({ products: [], categories: [], stale: false });
     return json([]);
@@ -89,6 +91,19 @@ it('shows the reports page and navigation link for admins', async () => {
   });
   expect(await screen.findByRole('heading', { name: 'Sponsor Report' })).toBeInTheDocument();
   expect(screen.queryByRole('heading', { name: 'Audit Log' })).not.toBeInTheDocument();
+});
+
+it('routes administrators to Admin Reports', async () => {
+  renderAs('admin', '/admin/reports');
+  expect(await screen.findByRole('heading', { name: 'Admin Reports' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Sales Reports' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Admin Reports' })).toBeInTheDocument();
+});
+
+it('keeps non-admins out of Admin Reports', async () => {
+  renderAs('sponsor', '/admin/reports');
+  expect(await screen.findByRole('heading', { name: 'Point transaction backlog' })).toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'Admin Reports' })).not.toBeInTheDocument();
 });
 
 it('shows the reports page and navigation link for sponsors', async () => {

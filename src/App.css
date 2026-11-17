@@ -843,6 +843,7 @@ body {
 .reports-panel__heading h2 { color: var(--color-asphalt); font-size: 1.45rem; margin: 0; }
 .reports-panel__tag { background: #edf3f8; border: 1px solid #d6e2eb; border-radius: 999px; color: #2f5c80; font-size: 0.78rem; font-weight: 800; padding: 0.45rem 0.75rem; }
 .reports-filters { align-items: end; display: grid; gap: 0.9rem; grid-template-columns: minmax(180px, 1.4fr) repeat(2, minmax(150px, 1fr)) auto; padding: 1.4rem 0; }
+.admin-sales-report-filters { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 .reports-filters label { color: var(--color-slate); display: grid; font-size: 0.82rem; font-weight: 700; gap: 0.4rem; }
 .reports-filters select, .reports-filters input { background: #fff; border: 1px solid #cbd2d8; border-radius: 5px; color: var(--color-asphalt); font: inherit; min-height: 2.65rem; min-width: 0; padding: 0.55rem 0.65rem; }
 .reports-filters select:focus, .reports-filters input:focus { border-color: var(--color-steel); outline: 2px solid rgba(58, 110, 165, 0.18); }

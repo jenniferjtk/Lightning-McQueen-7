@@ -160,6 +160,12 @@ export default function AdminHomePage({ user, onPageChange, onPreviewRole }) {
           <p>Create, update, or delete User profiles and their associated information.</p>
           <button type="button" onClick={() => onPageChange('drivers')}>Open User management</button>
         </article>
+        <article className="admin-action-card">
+          <p className="admin-action-card__label">Sales reporting</p>
+          <h2>Admin Reports</h2>
+          <p>Review sales by sponsor or driver with date filters and summary or detailed views.</p>
+          <button type="button" onClick={() => onPageChange('admin-reports')}>Open Admin Reports</button>
+        </article>
       </section>
       <PointChangeReports />
 
