@@ -80,6 +80,18 @@ describe('POST /api/auth/login', () => {
     expect(res.headers['set-cookie']).toBeDefined();
   });
 
+  it('returns the name and email when the account has a suspension status', async () => {
+    const tracked = { ...users.sponsor, account_status: 'active', suspended_until: null };
+    mockQueries([
+      ['FROM users WHERE email = ?', [tracked]],
+      ['INSERT INTO audit_events', { insertId: 1 }],
+      ["SET account_status = 'active'", { affectedRows: 0 }],
+      ['SELECT user_id, role, sponsor_id, account_status', [{ user_id: 2, role: 'sponsor', sponsor_id: 10, account_status: 'active', suspended_until: null }]],
+    ]);
+    const res = await request(app).post('/api/auth/login').send({ email: tracked.email, password: PASSWORD }).expect(200);
+    expect(res.body.user).toMatchObject({ id: 2, email: 'sponsor@test.com', role: 'sponsor', firstName: 'Sam', lastName: 'Sponsor', sponsorId: 10 });
+  });
+
   it('keeps the session for 30 days only when asked to remember the sign-in', async () => {
     const cookieLifetimeDays = async (body) => {
       mockQueries([

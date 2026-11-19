@@ -16,6 +16,8 @@ export default function AccountPage({ user, sponsors = [], points = 0, onProfile
     country: user?.country || 'United States',
   });
   const [saved, setSaved] = useState(false);
+  const [accountSaving, setAccountSaving] = useState(false);
+  const [accountError, setAccountError] = useState('');
   const [activeTab, setActiveTab] = useState('account');
   const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
   const [passwordMessage, setPasswordMessage] = useState('');
@@ -30,21 +32,39 @@ export default function AccountPage({ user, sponsors = [], points = 0, onProfile
   const [shippingMessage, setShippingMessage] = useState('');
   const [shippingError, setShippingError] = useState('');
 
+  // Phone isn't part of the login session's user, so keep whatever the
+  // account lookup below loaded when the user object changes.
   useEffect(() => {
-    setForm({
+    setForm((current) => ({
       firstName: user?.firstName || '',
       lastName: user?.lastName || '',
       email: user?.email || '',
-      phone: user?.phone || '',
+      phone: user?.phone ?? current.phone ?? '',
       sponsorName: user?.sponsorName || '',
       streetAddress: user?.streetAddress || '',
       city: user?.city || '',
       state: user?.state || '',
       zipCode: user?.zipCode || '',
       country: user?.country || 'United States',
-    });
-    setSaved(false);
+    }));
   }, [user]);
+
+  // The saved name, email, and phone from the database, so the form shows
+  // what will still be there after logging out.
+  useEffect(() => {
+    if (readOnly) return undefined;
+    let cancelled = false;
+    fetch('/api/account', { credentials: 'include' })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.account) throw new Error(data.message || 'Unable to load your account.');
+        if (!cancelled) setForm((current) => ({ ...current, ...data.account }));
+      })
+      .catch((requestError) => {
+        if (!cancelled) setAccountError(requestError.message);
+      });
+    return () => { cancelled = true; };
+  }, [readOnly]);
 
   useEffect(() => {
     if (!isDriver || readOnly) return undefined;
@@ -91,13 +111,33 @@ export default function AccountPage({ user, sponsors = [], points = 0, onProfile
   const updateField = (event) => {
     const { name, value } = event.target;
     setForm((current) => ({ ...current, [name]: value }));
+    setSaved(false);
   };
 
-  const submit = (event) => {
+  // Saves to the server first; the page only says "Account updated." once
+  // the change is stored, so it's still there after logging back in.
+  const submit = async (event) => {
     event.preventDefault();
-    const updatedUser = { ...user, ...form };
-    onProfileUpdate(updatedUser);
-    setSaved(true);
+    setSaved(false);
+    setAccountError('');
+    setAccountSaving(true);
+    try {
+      const response = await fetch('/api/account', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ firstName: form.firstName, lastName: form.lastName, email: form.email, phone: form.phone }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.account) throw new Error(data.message || 'Unable to save your account.');
+      onProfileUpdate?.({ ...user, ...data.account });
+      setForm((current) => ({ ...current, ...data.account }));
+      setSaved(true);
+    } catch (requestError) {
+      setAccountError(requestError.message);
+    } finally {
+      setAccountSaving(false);
+    }
   };
 
   const saveShippingAddress = async () => {
@@ -256,7 +296,7 @@ export default function AccountPage({ user, sponsors = [], points = 0, onProfile
 
             <label>
               Phone number
-              <input name="phone" value={form.phone} onChange={updateField} placeholder="(555) 123-4567" disabled={readOnly} />
+              <input type="tel" name="phone" value={form.phone} onChange={updateField} placeholder="(555) 123-4567" autoComplete="tel" disabled={readOnly} />
             </label>
 
             {isDriver && (sponsors.length > 1 ? (
@@ -430,11 +470,12 @@ export default function AccountPage({ user, sponsors = [], points = 0, onProfile
             )}
           </section>}
 
-          {saved && activeTab === 'account' && <p className="edit-account-form__success">Account updated.</p>}
+          {saved && activeTab === 'account' && <p className="edit-account-form__success" role="status">Account updated.</p>}
+          {accountError && activeTab === 'account' && <p className="edit-account-form__error" role="alert">{accountError}</p>}
 
           {activeTab === 'account' && (
             <div className="edit-account-form__actions">
-              <button className="edit-account-form__submit" type="button" onClick={submit} disabled={readOnly}>Save account</button>
+              <button className="edit-account-form__submit" type="button" onClick={submit} disabled={readOnly || accountSaving}>{accountSaving ? 'Saving...' : 'Save account'}</button>
               <a className="edit-account-form__secondary" href="/">Back to dashboard</a>
             </div>
           )}
