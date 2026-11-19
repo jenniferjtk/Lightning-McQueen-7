@@ -82,8 +82,9 @@ table records password changes and login attempts for the sponsor Audit Log
 report; application decisions are read from `driver_applications`, and point
 changes from `point_audit_log`.
 `005_point_change_reports.sql`, `006_shipping_address_and_catalog_stock.sql`,
-`007_orders.sql`, `008_driver_notifications.sql`, and
-`010_sponsor_driver_removals.sql`.
+`007_orders.sql`, `008_driver_notifications.sql`,
+`010_sponsor_driver_removals.sql`, and `011_user_phone.sql` (the optional
+phone number on the Account page).
 The sessions table is required on AWS, where
 logins are stored in MySQL instead of memory. The point-change reports table
 stores driver and sponsor reports for administrator review. The orders table

@@ -1364,6 +1364,13 @@ body {
   font-weight: 600;
 }
 
+.edit-account-form__error {
+  margin: 0;
+  color: #963b31;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
 .edit-account-form__actions {
   display: flex;
   align-items: center;

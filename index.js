@@ -214,6 +214,73 @@ app.get('/api/about', async (req, res) => {
   }
 });
 
+// A phone number is optional; when given it needs 7-15 digits and only the
+// usual separators.
+const validPhone = (phone) => /^[+\d\s().-]{7,30}$/.test(phone) && (phone.match(/\d/g) || []).length >= 7
+  && (phone.match(/\d/g) || []).length <= 15;
+
+const accountProfile = (row) => ({
+  firstName: row.first_name,
+  lastName: row.last_name,
+  email: row.email,
+  phone: row.phone || '',
+});
+
+// The signed-in user's own profile for the Account page (any role). Phone is
+// read only here, so a database without the phone column (migration 011)
+// breaks just this page, never login.
+app.get('/api/account', async (req, res) => {
+  if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
+  try {
+    const [rows] = await pool.execute(
+      'SELECT first_name, last_name, email, phone FROM users WHERE user_id = ?',
+      [req.session.userId],
+    );
+    if (!rows[0]) return res.status(401).json({ message: 'Session expired.' });
+    return res.json({ account: accountProfile(rows[0]) });
+  } catch (error) {
+    console.error('Account lookup failed:', error.message);
+    return res.status(500).json({ message: 'Unable to load your account.' });
+  }
+});
+
+// Saves the signed-in user's own name, email, and phone. The account comes
+// from the session, never the request, so nobody can edit someone else's.
+app.put('/api/account', async (req, res) => {
+  if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
+  const { firstName, lastName, email, phone } = req.body || {};
+  const first = typeof firstName === 'string' ? firstName.trim() : '';
+  const last = typeof lastName === 'string' ? lastName.trim() : '';
+  const address = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  const phoneText = typeof phone === 'string' ? phone.trim() : '';
+  if (!first || !last || first.length > 100 || last.length > 100) {
+    return res.status(400).json({ message: 'Enter a first and last name of 100 characters or fewer.' });
+  }
+  if (!validEmail(address) || address.length > 255) {
+    return res.status(400).json({ message: 'Enter a valid email address.' });
+  }
+  if (phoneText && !validPhone(phoneText)) {
+    return res.status(400).json({ message: 'Enter a phone number with 7 to 15 digits, or leave it blank.' });
+  }
+  try {
+    const [taken] = await pool.execute(
+      'SELECT user_id FROM users WHERE email = ? AND user_id <> ? LIMIT 1',
+      [address, req.session.userId],
+    );
+    if (taken[0]) return res.status(409).json({ message: 'Another account already uses that email address.' });
+    const [result] = await pool.execute(
+      'UPDATE users SET first_name = ?, last_name = ?, email = ?, phone = ? WHERE user_id = ?',
+      [first, last, address, phoneText || null, req.session.userId],
+    );
+    if (!result.affectedRows) return res.status(401).json({ message: 'Session expired.' });
+    return res.json({ account: { firstName: first, lastName: last, email: address, phone: phoneText } });
+  } catch (error) {
+    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ message: 'Another account already uses that email address.' });
+    console.error('Account update failed:', error.message);
+    return res.status(500).json({ message: 'Unable to save your account.' });
+  }
+});
+
 app.get('/api/auth/me', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ message: 'Not authenticated.' });
 
@@ -295,7 +362,9 @@ app.post('/api/auth/login', async (req, res) => {
     // "Keep me signed in" (the mobile app, story 29621): the session lasts 30
     // days instead of the default 8 hours.
     if (req.body.rememberMe === true) req.session.cookie.maxAge = REMEMBER_ME_MS;
-    return res.json({ user: publicUser(refreshedUser || user) });
+    // refreshedUser only has the account-status columns, so keep the name and
+    // email from the full row.
+    return res.json({ user: publicUser({ ...user, ...(refreshedUser || {}) }) });
   } catch (error) {
     console.error('Login failed:', error.message);
     return res.status(500).json({ message: 'Unable to sign you in.' });

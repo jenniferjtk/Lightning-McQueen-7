@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import React from 'react';
+import React, { useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import AccountPage from '../../src/components/AccountPage.jsx';
@@ -60,4 +60,49 @@ it('loads and saves the same persistent shipping address used in Catalog', async
     credentials: 'include',
     body: expect.stringContaining('45 Delivery Lane'),
   }));
+});
+it('saves the name, email, and phone to the server before saying it was updated', async () => {
+  const saved = { firstName: 'Samantha', lastName: 'Sponsor', email: 'sam@example.com', phone: '(864) 555-0100' };
+  const fetchMock = vi.fn(async (url, options = {}) => ({
+    ok: true,
+    json: async () => (url === '/api/account' && options.method === 'PUT'
+      ? { account: saved }
+      : url === '/api/account'
+        ? { account: { firstName: 'Sam', lastName: 'Sponsor', email: 'sam@example.com', phone: '' } }
+        : { sponsorLinked: true, drivers: [] }),
+  }));
+  vi.stubGlobal('fetch', fetchMock);
+  const onProfileUpdate = vi.fn();
+  // Like App, hand the saved user back to the page so it re-renders with it.
+  function Harness() {
+    const [user, setUser] = useState({ id: 2, role: 'sponsor', firstName: 'Sam', lastName: 'Sponsor', email: 'sam@example.com' });
+    return <AccountPage user={user} onProfileUpdate={(updated) => { onProfileUpdate(updated); setUser(updated); }} />;
+  }
+  render(<Harness />);
+
+  await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/account', { credentials: 'include' }));
+  fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'Samantha' } });
+  fireEvent.change(screen.getByLabelText('Phone number'), { target: { value: '(864) 555-0100' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save account' }));
+
+  expect(await screen.findByRole('status')).toHaveTextContent('Account updated.');
+  const put = fetchMock.mock.calls.find(([url, options]) => url === '/api/account' && options?.method === 'PUT');
+  expect(JSON.parse(put[1].body)).toEqual(saved);
+  expect(onProfileUpdate).toHaveBeenCalledWith(expect.objectContaining({ firstName: 'Samantha', phone: '(864) 555-0100' }));
+  expect(screen.getByLabelText('Phone number')).toHaveValue('(864) 555-0100');
+});
+
+it('shows the server error and does not claim the account was updated', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (url, options = {}) => (url === '/api/account' && options.method === 'PUT'
+    ? { ok: false, json: async () => ({ message: 'Another account already uses that email address.' }) }
+    : { ok: true, json: async () => ({ account: { firstName: 'Dana', lastName: 'Driver', email: 'dana@example.com', phone: '' } }) })));
+  const onProfileUpdate = vi.fn();
+  render(<AccountPage user={{ id: 5, role: 'driver', firstName: 'Dana', lastName: 'Driver' }} onProfileUpdate={onProfileUpdate} readOnly={false} />);
+
+  fireEvent.change(screen.getByLabelText('Email address'), { target: { value: 'taken@example.com' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save account' }));
+
+  expect(await screen.findByText('Another account already uses that email address.')).toBeInTheDocument();
+  expect(screen.queryByText('Account updated.')).not.toBeInTheDocument();
+  expect(onProfileUpdate).not.toHaveBeenCalled();
 });
